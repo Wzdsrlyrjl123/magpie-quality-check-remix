@@ -1,4 +1,7 @@
-# Magpie Intelligence Check
+# Magpie Intelligence Check（改编维护分支）
+
+> **改编声明**：本仓库基于 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check) 改编，是本地 v0.4.1 修改版的个人维护分支，并非上游官方发布。原项目作者为 **木子不是木子狸（mu-zi-lee）**；原作者版权声明与 MIT License 完整保留，见 [LICENSE](LICENSE)。
+
 
 Magpie 插件，用于对指定的主力模型做质量探针。默认仅检测，业务请求继续通过，可同时使用多个 harness；也可开启强制门禁，在探针未通过或结果过期时拦截请求，并限定生效的 harness。
 
