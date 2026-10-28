@@ -14,6 +14,8 @@ try{
  const installed=path.join(dir,name);
  const check=spawnSync(process.execPath,[path.join(root,'scripts/plugin-check.mjs')],{env:{...process.env,PLUGIN_ROOT:installed},stdio:'inherit'});assert.equal(check.status,0);
  const pkg=JSON.parse(await fs.readFile(path.join(installed,'package.json'),'utf8'));assert.equal(pkg.magpie.middleware,'./plugin/gate.middleware.js');
+ const adapterDir=path.join(installed,'adapters','qoder');
+ const adapter=JSON.parse(await fs.readFile(path.join(adapterDir,'package.json'),'utf8'));assert.equal(adapter.main,'./index.mjs');await fs.access(path.join(adapterDir,'index.mjs'));
  if(process.env.MAGPIE_BINARY){
   const env={...process.env,HOME:dir,XDG_CONFIG_HOME:path.join(dir,'config'),XDG_CACHE_HOME:path.join(dir,'cache')};
   const registration=spawnSync(process.env.MAGPIE_BINARY,['plugin','add',installed],{env,encoding:'utf8',timeout:90000});

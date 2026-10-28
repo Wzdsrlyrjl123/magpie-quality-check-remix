@@ -37,7 +37,7 @@ jobs:
         run: |
           go test -race ./...
           go vet ./...
-          node --test plugin/*.test.mjs scripts/answer-analysis.test.mjs
+          node --test plugin/*.test.mjs scripts/answer-analysis.test.mjs adapters/qoder/observation.test.mjs
       - name: Build and verify packages
         run: |
           node scripts/build-release.mjs
@@ -62,5 +62,7 @@ jobs:
           本版本为 **Magpie 质量检测 · 二创版**，基于 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check) 改编，是个人维护分支，并非上游官方发布。
 
           原项目作者：**木子不是木子狸（mu-zi-lee）**。原作者版权声明与 MIT License 完整保留。
+
+          新增上游原始回传采集，首批支持 Qoder；页面区分网关路由与上游原始字段。上游未返回时不推测，旧记录不补造。Qoder 配套适配器基于 `@magpie-community/opencode-qoder-auth` 0.2.46（MIT）改编，保留来源和许可。
           NOTES
           gh release create "$RELEASE_TAG" dist/*.tgz dist/manifest.json --verify-tag --title "$RELEASE_TAG · Magpie 质量检测（二创版）" --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes

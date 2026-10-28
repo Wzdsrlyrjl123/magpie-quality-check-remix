@@ -11,7 +11,7 @@ Magpie 通过仓库安装时直接读取 `package.json` 和 `bin/`，不会替�
 
 ## 发布新版本
 
-1. 更新 `package.json` 的版本号，例如从 `0.4.2` 改为 `0.4.3`。
+1. 更新 `package.json` 的版本号，例如从 `0.4.2` 改为 `0.5.0`。
 2. 执行检查和构建：
 
    ```sh
@@ -25,7 +25,7 @@ Magpie 通过仓库安装时直接读取 `package.json` 和 `bin/`，不会替�
 
 3. 确认 `plugin/gate.middleware.js` 只有初始放行函数。不要提交运行后生成的模型状态、探针别名、数据库、网关凭据或本机配置。
 4. 将源码、版本号和 `bin/quality-check-*` 一起提交并推送到 `main`。
-5. 为同一提交创建并推送对应标签，例如 `v0.4.3`。GitHub Actions 会检查版本号、重新构建五个平台发行包，并将校验清单和安装包上传到 GitHub Release。也可手动运行工作流，仅构建和保存产物。
+5. 为同一提交创建并推送对应标签，例如 `v0.5.0`。GitHub Actions 会检查版本号、重新构建五个平台发行包，并将校验清单和安装包上传到 GitHub Release。也可手动运行工作流，仅构建和保存产物。
 
 用户在 Magpie 插件页面点击更新，或执行：
 
@@ -33,9 +33,11 @@ Magpie 通过仓库安装时直接读取 `package.json` 和 `bin/`，不会替�
 magpie plugin update
 ```
 
-`magpie plugin update` 会检查所有已安装插件。保持同一个 GitHub 安装地址，后续无需再选择本地目录。
+`magpie plugin update` 会检查所有已安装插件。主包包含 `adapters/qoder`，该目录随主包更新；Qoder 配套插件须单独添加并选择，不会自动安装或切换。确保配套插件的路径仍指向已安装主包内的目录，并与主插件使用相同 dataDir。保留原 Qoder 插件及账号以便切回。
 
 从本地路径迁移时，先停用或移除本地插件的登记，再添加 GitHub 地址，避免两个后台争用默认数据目录。检测数据默认保存在 `~/.config/magpie-quality-check`，不会因为移除插件登记而自动删除。
+
+Qoder 适配器的 vendor 基于固定版本 `@magpie-community/opencode-qoder-auth` 0.2.46，维护时需同步上游更新并复核采集改动及许可，见 `third_party/qoder/NOTICE.md`。更新不能补齐旧记录中未采集的原始回传。
 
 ## 本地开发
 

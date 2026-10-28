@@ -14,7 +14,7 @@ await fs.copyFile(path.join(root,'bin',process.platform==='win32'?'quality-check
 const child=spawn(binary,['-data',dir,'-gate',path.join(dir,'gate.js'),'-owned'],{stdio:['pipe','pipe','pipe'],windowsHide:true});
 let output='';
 const info=await new Promise((resolve,reject)=>{child.stdout.on('data',b=>{output+=b;const i=output.indexOf('\n');if(i>=0)resolve(JSON.parse(output.slice(0,i)))});child.once('error',reject)});
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||undefined});
 let badFingerprint=false;
 let manualRun=0, truncated=false;
 let manualSVG;
@@ -165,6 +165,7 @@ try{
  await page.locator('#theme').click();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  await page.locator('#tab-history').focus();await page.keyboard.press('Home');
  assert.equal(await page.locator('#tab-models').getAttribute('aria-selected'),'true');
+ await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#tab-routes').getAttribute('aria-selected'),'true');
  await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#tab-tests').getAttribute('aria-selected'),'true');
  assert.equal(await page.locator('#prompt').inputValue(),'milk','poll reset selected prompt');
  let failNextState=true;
@@ -176,21 +177,50 @@ try{
  assert.ok(!(await page.locator('#message').textContent()).includes('<html>'));
  await page.waitForFunction(()=>document.querySelector('#message').textContent==='',{},{timeout:10000});
  await page.unroute('**/api/state');
+ // Render actual DOM with synthetic route records to verify source separation and escaping.
+ await page.route('**/api/state', async route => {
+  const response=await route.fetch(); const payload=await response.json();
+  payload.state.routes=[
+   {model:'alias',served:'gateway',body_model:'rewritten',self_claim:'<img src=x onerror=window.routeExecuted=1>',upstream_status:'observed',upstream_model:'raw-a',upstream_models:['raw-a','raw-b',42],upstream_sent_model:'sent',upstream_source:'qoder.raw_sse.body.model',upstream_conflict:true},
+   {model:'missing',served:'must-not-fallback',body_model:'must-not-fallback-body',upstream_status:'not_returned'},
+   {model:'uncaptured',served:'gateway',upstream_status:'not_captured'},
+   {model:'historical',served:'old-route',body_model:'old-body'}
+  ]; await route.fulfill({response,json:payload});
+ });
+ await page.locator('#tab-models').click();
+ await page.waitForFunction(()=>document.querySelector('#routeResults').textContent.includes('raw-a'),{},{timeout:10000});
+ const routeRows=page.locator('#routeResults tr');
+ const observed=routeRows.filter({hasText:'raw-a'});
+ assert.match(await observed.textContent(),/raw-a.*raw-b/s);
+ assert.match(await observed.textContent(),/上游返回多个不同值/);
+ assert.match(await observed.textContent(),/回传与发送字段不同/);
+ assert.match(await observed.textContent(),/别名路由不同/);
+ assert.match(await observed.locator('details').textContent(),/网关响应model（可能已改写）.*rewritten/s);
+ assert.match(await observed.locator('details').textContent(),/探测文本（不用于型号判定）/);
+ assert.equal(await page.evaluate(()=>window.routeExecuted),undefined);
+ assert.match(await routeRows.filter({hasText:'missing'}).locator('td').nth(2).textContent(),/上游未返回模型字段/);
+ assert.doesNotMatch(await routeRows.filter({hasText:'missing'}).locator('td').nth(2).locator(':scope > span').textContent(),/must-not-fallback/);
+ assert.match(await routeRows.filter({hasText:'uncaptured'}).locator('td').nth(2).textContent(),/未采集原始回传/);
+ assert.match(await routeRows.filter({hasText:'historical'}).locator('td').nth(2).textContent(),/旧记录未采集/);
+ await page.unroute('**/api/state');
  await fs.mkdir(path.join(root,'artifacts'),{recursive:true});
  for(const [name,width,height]of [['desktop',1280,900],['mobile',390,844]]){
   await page.setViewportSize({width,height});
   for(const mode of ['dark','light']){
    if(await page.locator('html').getAttribute('data-theme')!==mode)await page.locator('#theme').click();
-   for(const view of ['models','tests','fingerprint','history']){
+   for(const view of ['models','routes','tests','fingerprint','history']){
     await page.locator('#tab-'+view).click();
     await page.screenshot({path:path.join(root,'artifacts',`${name}-${mode}-${view}.png`),fullPage:true});
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${name} ${view} overflow`);
+    const layout=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].filter(e=>{const r=e.getBoundingClientRect();return r.width && r.right>innerWidth+1 && getComputedStyle(e).position!=='fixed'}).slice(0,20).map(e=>[e.tagName,e.id,e.className,e.getBoundingClientRect().right])}));
+    assert.equal(layout.scroll>layout.width,false,`${name} ${view} overflow: ${JSON.stringify(layout.elements)}`);
    }
   }
  }
  await page.setViewportSize({width:320,height:720});
- for(const view of ['models','tests','fingerprint','history']){
-  await page.locator('#tab-'+view).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`320px ${view} overflow`);
+ for(const view of ['models','routes','tests','fingerprint','history']){
+  await page.locator('#tab-'+view).click();
+  const overflow=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].filter(e=>{const r=e.getBoundingClientRect();return r.width && r.right>innerWidth+1 && getComputedStyle(e).position!=='fixed'}).slice(0,12).map(e=>[e.tagName,e.id,e.className,e.getBoundingClientRect().right])}));
+  assert.equal(overflow.scroll>overflow.width,false,`320px ${view} overflow: ${JSON.stringify(overflow.elements)}`);
  }
  assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')),[]);console.log('PASS: configuration flow, seven prompts, two fingerprint batches, 18 candidates, preserved drafts/details, filters, keyboard, dark/light desktop and 320/390px mobile, transient 502 recovery');
  assert.equal(await page.locator('#message').textContent(),'','页面显示错误');

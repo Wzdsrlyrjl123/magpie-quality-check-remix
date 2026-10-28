@@ -180,25 +180,43 @@ function renderRoutes() {
     target.dataset.label = '请求的模型';
     target.append(text('div', record.model));
     target.append(text('span', dateTime(record.time) + (record.effort ? ' / ' + effortLabel(record.effort) : '') + (record.direct ? ' / 直连（门禁未生效）' : ''), 'cell-meta'));
-    const actual = record.served || record.body_model || '';
     const served = text('td', '');
-    served.dataset.label = '实际交付';
-    if (actual) {
-      const same = actual === record.model;
-      served.append(text('div', actual, 'route-actual ' + (same ? 'match' : 'diff')));
-      served.append(text('span', same ? '与请求一致' : '与请求不同', 'cell-meta'));
+    served.dataset.label = '网关路由';
+    const route = typeof record.served === 'string' ? record.served : '';
+    served.append(text('div', route || '未取得网关路由', 'route-actual' + (route ? '' : ' unknown')));
+    if (route && record.model && route !== record.model) served.append(text('span', '别名路由不同', 'cell-meta'));
+    const upstream = text('td', '');
+    upstream.dataset.label = '上游原始回传';
+    const observed = record.upstream_status === 'observed';
+    const values = Array.isArray(record.upstream_models) ? [...new Set(record.upstream_models.filter(v => typeof v === 'string' && v))] : [];
+    const model = typeof record.upstream_model === 'string' ? record.upstream_model : '';
+    if (model && !values.includes(model)) values.unshift(model);
+    if (observed && values.length) {
+      for (const value of values) upstream.append(text('div', value, 'route-actual'));
+      if (record.upstream_conflict || values.length > 1) upstream.append(text('span', '上游返回多个不同值', 'route-conflict'));
+      if (typeof record.upstream_source === 'string' && record.upstream_source) upstream.append(text('span', '来源：' + record.upstream_source, 'cell-meta'));
+      if (typeof record.upstream_sent_model === 'string' && record.upstream_sent_model && values.some(v => v !== record.upstream_sent_model)) upstream.append(text('span', '回传与发送字段不同', 'cell-meta'));
     } else {
-      served.append(text('span', record.error || '未取得回执', 'route-actual unknown'));
+      const state = record.upstream_status === 'not_returned' ? '上游未返回模型字段' : record.upstream_status ? '未采集原始回传' : '旧记录未采集';
+      upstream.append(text('span', state, 'route-actual unknown'));
     }
+    const details = document.createElement('details');
+    details.className = 'route-details';
+    details.append(text('summary', '查看详情'));
+    const evidence = [
+      ['上游发送 model', record.upstream_sent_model], ['响应 ID', record.response_id],
+      ['采集说明', record.upstream_note], ['网关响应model（可能已改写）', record.body_model],
+      ['探测文本（不用于型号判定）', record.self_claim], ['请求错误', record.error],
+    ];
+    for (const [label, value] of evidence) if (typeof value === 'string' && value) details.append(text('div', label + '：' + value, 'cell-meta'));
+    upstream.append(details);
     const provider = text('td', record.provider || '—', '');
     provider.dataset.label = '渠道';
     const cost = text('td', fmtMS(record.ms), 'numeric');
     cost.dataset.label = '耗时';
     const tokens = text('td', record.tokens ? record.tokens + ' tokens' : '—', 'numeric');
     tokens.dataset.label = '用量';
-    const claim = text('td', record.self_claim || (record.error ? record.error : '—'), 'cell-claim');
-    claim.dataset.label = '模型自述';
-    row.append(target, served, provider, cost, tokens, claim);
+    row.append(target, served, upstream, provider, cost, tokens);
     return row;
   });
   if (!rows.length) {
@@ -248,14 +266,13 @@ async function loadUsage() {
       const raw = entry.t || '';
       const when = raw ? new Date(raw).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
       const served = entry.served || '';
-      const diff = served && entry.req && served !== entry.req;
       const status = entry.status ? String(entry.status) : '—';
       const statusCell = text('td', status + (entry.err ? ' / ' + entry.err.slice(0, 40) : ''), 'numeric' + (status.startsWith('2') ? '' : ' error-text'));
       row.append(
         text('td', when, 'numeric'),
         text('td', entry.agent || '—', ''),
         text('td', entry.req || '—', 'model-id'),
-        text('td', served || '—', 'route-actual ' + (diff ? 'diff' : 'match')),
+        text('td', served || '—', 'route-actual'),
         text('td', entry.provider || '—', ''),
         text('td', entry.account || '—', ''),
         statusCell,

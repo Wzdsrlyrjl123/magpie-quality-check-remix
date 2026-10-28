@@ -52,8 +52,8 @@
     </div>
   </section>
   <section id="view-routes" class="view" role="tabpanel" aria-labelledby="tab-routes" hidden>
-    <div class="section-heading"><h2>路由核对</h2><span class="meta">按请求回执判定，不依赖模型自述</span></div>
-    <p class="disclaimer">发一次最小请求，比较「你请求的别名」与「网关实际交付的模型」。判读顺序：响应头 <code>X-Magpie-Model</code> → Magpie 请求日志 → 模型自述（仅作佐证）。渠道的系统提示词可以改写模型自述，冲突时以前两条为准。核对只消耗探针额度，不改变门禁状态。</p>
+    <div class="section-heading"><h2>路由核对</h2><span class="meta">分别展示网关路由与上游回传</span></div>
+    <p class="disclaimer">发一次最小请求，分别查看请求别名、网关路由和上游原始回传。原始 model 是上游声明，不是模型身份认证。目前仅 Qoder 配套适配器采集原始回传，其他渠道未采集。核对只消耗探针额度，不改变门禁状态。</p>
     <div class="test-controls">
       <label class="grow">完整模型 ID<input id="routeModel" list="catalog" placeholder="provider/model" autocomplete="off" spellcheck="false"></label>
       <label>思考强度<select id="routeEffort" aria-label="路由核对思考强度"></select></label>
@@ -62,13 +62,13 @@
     <p id="routeStatus" class="inline-state" role="status"></p>
     <div class="answer-heading"><h2>核对结果</h2><div class="answer-tools"><button id="routeExport" class="icon-button" aria-label="导出核对结果" data-tooltip="导出核对结果" data-icon="Download"></button><button id="routeClear" class="icon-button" aria-label="清理核对结果" data-tooltip="清理核对结果" data-icon="Trash2"></button></div></div>
     <div class="table-wrap route-scroll">
-      <table class="targets-table route-table"><thead><tr><th>请求的模型</th><th>实际交付</th><th>渠道</th><th>耗时</th><th>用量</th><th>模型自述</th></tr></thead><tbody id="routeResults"></tbody></table>
+      <table class="targets-table route-table"><thead><tr><th>请求别名</th><th>网关路由</th><th>上游原始回传</th><th>渠道</th><th>耗时</th><th>用量</th></tr></thead><tbody id="routeResults"></tbody></table>
     </div>
     <div class="section-heading"><h2>网关请求日志</h2><span id="usagePathLabel" class="meta"></span></div>
-    <p class="disclaimer">来自 Magpie 的 <code>usage.jsonl</code>：<code>req</code> 是请求的别名，<code>served</code> 是最终交付的模型。这条回执由网关落库，不需要模型配合，比探针更可信。</p>
+    <p class="disclaimer">来自 Magpie 的 <code>usage.jsonl</code>：<code>req</code> 是请求别名，<code>served</code> 是网关路由，不能作为上游模型身份。</p>
     <div class="answer-tools"><button id="usageLoad" class="secondary"><i data-icon="RefreshCw"></i><span>读取请求日志</span></button></div>
     <div class="table-wrap route-scroll">
-      <table class="targets-table route-table usage-table"><thead><tr><th>时间</th><th>调用方</th><th>请求的模型</th><th>实际交付</th><th>渠道</th><th>账号</th><th>状态</th></tr></thead><tbody id="usageRows"></tbody></table>
+      <table class="targets-table route-table usage-table"><thead><tr><th>时间</th><th>调用方</th><th>请求的模型</th><th>网关路由</th><th>渠道</th><th>账号</th><th>状态</th></tr></thead><tbody id="usageRows"></tbody></table>
     </div>
   </section>
   <section id="view-tests" class="view" role="tabpanel" aria-labelledby="tab-tests" hidden>

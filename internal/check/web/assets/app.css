@@ -28,14 +28,20 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .route-table th:first-child,.route-table th:nth-child(2),.route-table th:nth-child(3),.route-table th:nth-child(4),.route-table th:nth-child(5),.route-table th:last-child{width:auto}
 .route-table td{white-space:normal}
 .usage-table th:first-child{width:11%}.usage-table th:nth-child(2){width:8%}.usage-table th:nth-child(3){width:24%}.usage-table th:nth-child(4){width:22%}.usage-table th:nth-child(5){width:13%}.usage-table th:nth-child(6){width:13%}.usage-table th:last-child{width:9%}
-.route-table th:nth-child(4),.route-table th:nth-child(5){width:10%}
-.route-table th:nth-child(3){width:13%}
-.route-table th:nth-child(6){width:26%}
+.route-table th:nth-child(5),.route-table th:nth-child(6){width:9%}
+.route-table th:nth-child(4){width:12%}
+.route-table th:nth-child(3){width:25%}
 .usage-table td:first-child,.usage-table td:last-child{white-space:nowrap}
 #view-routes .section-heading:not(:first-child){margin-top:36px}
 .route-scroll+.disclaimer{margin-top:12px}
 .route-scroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:4px}
 .route-scroll .targets-table{table-layout:fixed}
 @media(max-width:680px){.route-scroll{max-height:none;border:0}}
-@media(min-width:681px){.route-table th:first-child{width:24%}.route-table th:nth-child(2){width:20%}.route-table td{padding-top:12px;padding-bottom:12px}}
+@media(min-width:681px){.route-table th:first-child{width:23%}.route-table th:nth-child(2){width:22%}.route-table td{padding-top:12px;padding-bottom:12px}}
 @media(max-width:680px){.cell-claim{max-width:none}}
+
+.route-details{margin-top:6px;font-size:var(--small);overflow-wrap:anywhere}.route-details summary{cursor:pointer;color:var(--muted)}.route-conflict{display:block;color:var(--warning);font-weight:600}.route-details .cell-meta{display:block}
+
+@media(max-width:680px){.tabs{overflow-x:auto;gap:12px;justify-content:flex-start}.tabs button{flex-shrink:0}}
+
+#usagePathLabel{min-width:0;overflow-wrap:anywhere;text-align:right}

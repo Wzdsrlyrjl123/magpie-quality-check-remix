@@ -15,10 +15,8 @@ import (
 	"time"
 )
 
-// routePrompt asks the model to name itself. It is only a secondary clue: a
-// channel's system prompt can rewrite the answer, so the response headers and
-// the gateway request log always outrank it.
-const routePrompt = "只回复一行：你实际是什么模型（厂商 + 型号）。不要解释、不要重复问题。"
+// routePrompt is a minimal connectivity request.
+const routePrompt = "只回复 OK。"
 
 const routeMaxBytes = 512 * 1024
 
@@ -27,17 +25,25 @@ const RouteRecordCap = 300
 
 // RouteCheck is one route probe: what was requested versus what was served.
 type RouteCheck struct {
-	ID        string    `json:"id"`
-	Model     string    `json:"model"`
-	Served    string    `json:"served"`
-	Provider  string    `json:"provider"`
-	BodyModel string    `json:"body_model"`
-	SelfClaim string    `json:"self_claim"`
-	Status    int       `json:"status"`
-	Tokens    int       `json:"tokens"`
-	Effort    string    `json:"effort,omitempty"`
-	MS        int       `json:"ms"`
-	Error     string    `json:"error,omitempty"`
+	ResponseID        string   `json:"response_id"`
+	UpstreamStatus    string   `json:"upstream_status"`
+	UpstreamModel     string   `json:"upstream_model"`
+	UpstreamModels    []string `json:"upstream_models,omitempty"`
+	UpstreamSentModel string   `json:"upstream_sent_model,omitempty"`
+	UpstreamSource    string   `json:"upstream_source,omitempty"`
+	UpstreamConflict  bool     `json:"upstream_conflict,omitempty"`
+	UpstreamNote      string   `json:"upstream_note,omitempty"`
+	ID                string   `json:"id"`
+	Model             string   `json:"model"`
+	Served            string   `json:"served"`
+	Provider          string   `json:"provider"`
+	BodyModel         string   `json:"body_model"`
+	SelfClaim         string   `json:"self_claim"`
+	Status            int      `json:"status"`
+	Tokens            int      `json:"tokens"`
+	Effort            string   `json:"effort,omitempty"`
+	MS                int      `json:"ms"`
+	Error             string   `json:"error,omitempty"`
 	// Direct is true when the probe alias was unknown to the gateway, so the
 	// check ran on the plain model ID instead. Routing evidence is unaffected.
 	Direct bool      `json:"direct,omitempty"`
@@ -47,21 +53,25 @@ type RouteCheck struct {
 // probeRoute sends one minimal request and reports the gateway's own routing
 // verdict. It is a short prompt, so the shared client's ceiling is enough.
 func probeRoute(ctx context.Context, c Config, alias, model, effort string) RouteCheck {
+	return probeRouteWithObservations(ctx, c, alias, model, effort, "")
+}
+
+func probeRouteWithObservations(ctx context.Context, c Config, alias, model, effort, observationDir string) RouteCheck {
 	started := time.Now()
-	out, retry := probeRouteOnce(ctx, c, alias, model, effort, started)
+	out, retry := probeRouteOnce(ctx, c, alias, model, effort, started, observationDir)
 	// The probe alias is stripped by the gate middleware. When Magpie has not
 	// loaded it (plugin inactive, or the file was just rewritten), the gateway
 	// answers 404 for the alias. Routing can still be checked on the plain model
 	// ID, so fall back rather than reporting a failure the user cannot act on.
 	if retry && ctx.Err() == nil {
-		out, _ = probeRouteOnce(ctx, c, model, model, effort, started)
+		out, _ = probeRouteOnce(ctx, c, model, model, effort, started, observationDir)
 		out.Direct = true
 	}
 	return out
 }
 
-func probeRouteOnce(ctx context.Context, c Config, alias, model, effort string, started time.Time) (RouteCheck, bool) {
-	out := RouteCheck{ID: Secret()[:12], Model: model, Time: started, Effort: effort}
+func probeRouteOnce(ctx context.Context, c Config, alias, model, effort string, started time.Time, observationDir string) (RouteCheck, bool) {
+	out := RouteCheck{ID: Secret()[:12], Model: model, Time: started, Effort: effort, UpstreamStatus: "not_captured"}
 	fail := func(reason string) (RouteCheck, bool) {
 		out.Error = reason
 		out.MS = int(time.Since(started) / time.Millisecond)
@@ -101,7 +111,7 @@ func probeRouteOnce(ctx context.Context, c Config, alias, model, effort string, 
 	}
 	defer resp.Body.Close()
 	out.Status = resp.StatusCode
-	// These two headers are the hard evidence: the gateway writes them itself.
+	// These headers report gateway routing, not the raw upstream model.
 	out.Served = strings.TrimSpace(resp.Header.Get("X-Magpie-Model"))
 	out.Provider = strings.TrimSpace(resp.Header.Get("X-Magpie-Provider"))
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, routeMaxBytes+1))
@@ -112,6 +122,7 @@ func probeRouteOnce(ctx context.Context, c Config, alias, model, effort string, 
 		return fail("回复超过大小限制")
 	}
 	var data struct {
+		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
@@ -125,7 +136,9 @@ func probeRouteOnce(ctx context.Context, c Config, alias, model, effort string, 
 	}
 	retry := false
 	if json.Unmarshal(raw, &data) == nil {
+		out.ResponseID = data.ID
 		out.BodyModel = strings.TrimSpace(data.Model)
+		applyUpstreamObservation(&out, observationDir, started, time.Now())
 		out.Tokens = data.Usage.Total
 		if len(data.Choices) > 0 {
 			out.SelfClaim = truncateRunes(strings.TrimSpace(data.Choices[0].Message.Content), 400)
@@ -202,7 +215,7 @@ func (s *Service) CheckRoute(model, effort string) error {
 	go func() {
 		defer s.wg.Done()
 		defer cancel()
-		result := probeRoute(ctx, cfg, alias, model, level)
+		result := probeRouteWithObservations(ctx, cfg, alias, model, level, filepath.Join(s.dir, "upstream-observations"))
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		delete(s.routeRunning, model)
