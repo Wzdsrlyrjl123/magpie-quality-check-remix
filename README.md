@@ -1,6 +1,6 @@
-# Magpie Intelligence Check（改编维护分支）
+# Magpie 质量检测 · 二创版
 
-> **改编声明**：本仓库基于 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check) 改编，是本地 v0.4.1 修改版的个人维护分支，并非上游官方发布。原项目作者为 **木子不是木子狸（mu-zi-lee）**；原作者版权声明与 MIT License 完整保留，见 [LICENSE](LICENSE)。
+> **改编声明**：本仓库基于 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check) 改编，是基于本地修改版继续维护的二创分支，并非上游官方发布。原项目作者为 **木子不是木子狸（mu-zi-lee）**；原作者版权声明与 MIT License 完整保留，见 [LICENSE](LICENSE)。
 
 
 Magpie 插件，用于对指定的主力模型做质量探针。默认仅检测，业务请求继续通过，可同时使用多个 harness；也可开启强制门禁，在探针未通过或结果过期时拦截请求，并限定生效的 harness。
@@ -42,6 +42,10 @@ Magpie 插件，用于对指定的主力模型做质量探针。默认仅检测�
 
 **升级说明**：旧版未保存 `gate_mode` 的配置升级后也使用“仅检测”，保留目标、记录和凭据。需要保留旧版拦截行为的用户，请在设置中明确选择“强制门禁”并保存。
 
+## v0.4.2 二创版命名说明
+
+仓库与安装包现使用独立名称 `magpie-quality-check-remix`，插件和控制台明确显示“二创版”，避免与上游官方项目混淆。原项目作者、版权与 MIT 许可保持完整。原有检测数据目录与内部插件标识沿用，升级后可继续读取已有设置和历史记录。
+
 ## 安装
 
 ### 从 Magpie 的安装框添加
@@ -49,18 +53,18 @@ Magpie 插件，用于对指定的主力模型做质量探针。默认仅检测�
 在“已有想装的？”输入框填写：
 
 ```text
-github:Wzdsrlyrjl123/magpie-intelligence-check
+github:Wzdsrlyrjl123/magpie-quality-check-remix
 ```
 
 仓库包含五个平台的 Go 二进制，插件会按 Magpie 所在机器的系统和架构选择。
 
-这是本地 v0.4.1 的维护分支，上游项目为 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check)，保留原项目 MIT 许可。
+这是个人二创维护分支，上游项目为 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check)，保留原项目 MIT 许可。
 
 后续更新时，在 Magpie 插件页面点击更新，或执行 `magpie plugin update`。请始终使用同一个 GitHub 仓库地址；如果原先安装的是本地目录，先停用或移除旧的本地插件登记，再添加此 GitHub 地址，避免两个后台同时使用同一数据目录。插件检测数据保存在独立的数据目录中，移除插件登记不会自动删除这些数据。
 
-维护者发布步骤见 [PUBLISHING.md](https://github.com/Wzdsrlyrjl123/magpie-intelligence-check/blob/main/PUBLISHING.md)。
+维护者发布步骤见 [PUBLISHING.md](https://github.com/Wzdsrlyrjl123/magpie-quality-check-remix/blob/main/PUBLISHING.md)。
 
-供应商显示名为 **Intelligence Check**。更新后请重新打开管理入口；如果旧后台仍在运行，请重启 Magpie。
+供应商显示名为 **Magpie 质量检测 · 二创版**。更新后请重新打开管理入口；如果旧后台仍在运行，请重启 Magpie。
 
 ### 使用发行包
 
@@ -68,17 +72,17 @@ github:Wzdsrlyrjl123/magpie-intelligence-check
 
 | 平台 | 文件 |
 | --- | --- |
-| Linux x86_64 | `magpie-intelligence-check-linux-amd64.tgz` |
-| Linux ARM64 | `magpie-intelligence-check-linux-arm64.tgz` |
-| macOS Intel | `magpie-intelligence-check-darwin-amd64.tgz` |
-| macOS Apple Silicon | `magpie-intelligence-check-darwin-arm64.tgz` |
-| Windows x86_64 | `magpie-intelligence-check-windows-amd64.tgz` |
+| Linux x86_64 | `magpie-quality-check-remix-linux-amd64.tgz` |
+| Linux ARM64 | `magpie-quality-check-remix-linux-arm64.tgz` |
+| macOS Intel | `magpie-quality-check-remix-darwin-amd64.tgz` |
+| macOS Apple Silicon | `magpie-quality-check-remix-darwin-arm64.tgz` |
+| Windows x86_64 | `magpie-quality-check-remix-windows-amd64.tgz` |
 
 解压后，把解压出的**完整目录**添加到 Magpie：
 
 ```sh
-tar -xzf magpie-intelligence-check-darwin-arm64.tgz
-magpie plugin add /absolute/path/to/magpie-intelligence-check-darwin-arm64
+tar -xzf magpie-quality-check-remix-darwin-arm64.tgz
+magpie plugin add /absolute/path/to/magpie-quality-check-remix-darwin-arm64
 ```
 
 安装目录需要保持固定并可写。插件会在其中读取 JavaScript 门禁文件，并由 Go 后台原子更新该文件。Windows 下 Go 后台二进制会先按内容摘要暂存到数据目录的 `runtime/` 再启动，避免受限安装目录的文件完整性标签阻止后台写入数据。
@@ -91,7 +95,7 @@ magpie plugin add /absolute/path/to/magpie-intelligence-check-darwin-arm64
 
 ```sh
 go build -o bin/quality-check ./cmd/quality-check
-magpie plugin add /absolute/path/to/magpie-intelligence-check
+magpie plugin add /absolute/path/to/magpie-quality-check-remix
 ```
 
 开发目录需要包含 `plugin/`、`bin/quality-check`、`package.json` 和 `third_party/`。Magpie 主进程（桌面应用、`magpie web` 或 `magpie serve`）必须保持运行；插件后台跟随宿主进程生命周期。
@@ -215,7 +219,7 @@ SVG 题中的完整 SVG 可直接静态预览，不执行脚本、外部资源�
 
 欢迎实际测试后反馈：哪些题目现在仍然好用，哪些已经失效、答案有争议，或容易误判？现有题库不保证对所有模型版本、渠道和系统提示词都有效，请结合页面中的原始回答自行确认。
 
-如果你有**更新、可用的测试题**，或发现更适合推理、翻译、知识、复述等能力的题目，请[提交题库反馈 Issue](https://github.com/mu-zi-lee/magpie-intelligence-check/issues/new?template=question-bank.yml)。维护者会审核后手动添加或更新，不会自动把社区题目纳入门禁。
+如果你有**更新、可用的测试题**，或发现更适合推理、翻译、知识、复述等能力的题目，请[提交题库反馈 Issue](https://github.com/Wzdsrlyrjl123/magpie-quality-check-remix/issues/new?template=question-bank.yml)。维护者会审核后手动添加或更新，不会自动把社区题目纳入门禁。
 
 提交时请提供：
 

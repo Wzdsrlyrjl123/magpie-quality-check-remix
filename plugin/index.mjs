@@ -166,6 +166,6 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
     const service=await ready;
     stopDiscovery ??= startGatewayDiscovery(service, options);
     cfg.provider ??= {};
-    cfg.provider['quality-check'] = { name: 'Intelligence Check', models: {} };
+    cfg.provider['quality-check'] = { name: 'Magpie 质量检测 · 二创版', models: {} };
   }
 }) };

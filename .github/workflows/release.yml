@@ -55,4 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/*.tgz dist/manifest.json --verify-tag --title "$RELEASE_TAG" --generate-notes
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          ## 二创说明
+
+          本版本为 **Magpie 质量检测 · 二创版**，基于 [mu-zi-lee/magpie-intelligence-check](https://github.com/mu-zi-lee/magpie-intelligence-check) 改编，是个人维护分支，并非上游官方发布。
+
+          原项目作者：**木子不是木子狸（mu-zi-lee）**。原作者版权声明与 MIT License 完整保留。
+          NOTES
+          gh release create "$RELEASE_TAG" dist/*.tgz dist/manifest.json --verify-tag --title "$RELEASE_TAG · Magpie 质量检测（二创版）" --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes

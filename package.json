@@ -1,6 +1,6 @@
 {
-  "name": "magpie-intelligence-check",
-  "version": "0.4.1",
+  "name": "magpie-quality-check-remix",
+  "version": "0.4.2",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
@@ -23,14 +23,14 @@
     "test:install": "node scripts/install-check.mjs",
     "test:clients": "node scripts/client-check.mjs"
   },
-  "description": "Magpie model quality checks, monitoring and local management console",
+  "description": "Magpie 质量检测 · 二创版，基于 mu-zi-lee/magpie-intelligence-check 改编，保留原作者版权与 MIT 许可。",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Wzdsrlyrjl123/magpie-intelligence-check.git"
+    "url": "git+https://github.com/Wzdsrlyrjl123/magpie-quality-check-remix.git"
   },
-  "homepage": "https://github.com/Wzdsrlyrjl123/magpie-intelligence-check#readme",
+  "homepage": "https://github.com/Wzdsrlyrjl123/magpie-quality-check-remix#readme",
   "bugs": {
-    "url": "https://github.com/Wzdsrlyrjl123/magpie-intelligence-check/issues"
+    "url": "https://github.com/Wzdsrlyrjl123/magpie-quality-check-remix/issues"
   },
   "license": "MIT"
 }

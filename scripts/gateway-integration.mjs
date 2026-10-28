@@ -57,7 +57,7 @@ try {
     headers: { cookie }, signal: AbortSignal.timeout(60000),
   });
   assert.equal(plugins.status, 200);
-  assert.match(await plugins.text(), /Intelligence Check/);
+  assert.match(await plugins.text(), /二创版/);
   const signin = await fetch(new URL('/api/plugin-signin', link), {
     method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: new URL(link).origin },
     body: JSON.stringify({ provider: 'quality-check', method: 0 }), signal: AbortSignal.timeout(10000),
