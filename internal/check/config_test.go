@@ -10,11 +10,11 @@ import (
 
 func TestInitialConfigPreservesManualAndRetainsKey(t *testing.T) {
 	s := fixture(t)
-	manual := Config{GatewayURL: "https://manual.example/v1", GatewayKey: "private-key", DailyLimit: 45}
+	manual := Config{GatewayURL: "https://manual.example/v1", GatewayKey: "private-key", DailyLimit: 45, GateMode: "observe"}
 	if err := s.Configure(manual); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfigureInitial(Config{GatewayURL: "http://127.0.0.1:3425", GatewayKey: "magpie", DailyLimit: 120}); err != nil {
+	if err := s.ConfigureInitial(Config{GatewayURL: "http://127.0.0.1:3425", GatewayKey: "magpie", DailyLimit: 120, Effort: "max"}); err != nil {
 		t.Fatal(err)
 	}
 	if s.state.Config != manual {
@@ -27,6 +27,25 @@ func TestInitialConfigPreservesManualAndRetainsKey(t *testing.T) {
 	}
 	if s.state.Config.GatewayKey != "private-key" {
 		t.Fatal("blank form cleared key")
+	}
+}
+
+func TestInitialConfigAcceptsEffortAndRejectsBadOption(t *testing.T) {
+	s := fixture(t)
+	if err := s.ConfigureInitial(Config{GatewayURL: "http://127.0.0.1:3425", GatewayKey: "magpie", DailyLimit: 120, Effort: " High "}); err != nil {
+		t.Fatal(err)
+	}
+	if s.state.Config.Effort != "high" {
+		t.Fatalf("effort not normalized: %q", s.state.Config.Effort)
+	}
+
+	// A malformed plugin option must not stop discovery from connecting.
+	other := fixture(t)
+	if err := other.ConfigureInitial(Config{GatewayURL: "http://127.0.0.1:3425", GatewayKey: "magpie", DailyLimit: 120, Effort: "nonsense"}); err != nil {
+		t.Fatal(err)
+	}
+	if other.state.Config.GatewayURL == "" || other.state.Config.Effort != "" {
+		t.Fatalf("bad option not dropped: %+v", other.state.Config)
 	}
 }
 

@@ -25,6 +25,7 @@ func TestGateTimeBoundaries(t *testing.T) {
 			s := fixture(t)
 			s.SetTarget("a/solo", true)
 			s.mu.Lock()
+			s.state.Config.GateMode = "strict"
 			target := s.state.Targets["a/solo"]
 			target.State = tc.state
 			target.CheckedAt = tc.checked

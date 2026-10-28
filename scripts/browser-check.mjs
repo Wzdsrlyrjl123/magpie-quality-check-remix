@@ -9,7 +9,9 @@ const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root=path.resolve(import.meta.dirname,'..');
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'quality-ui-'));
-const child=spawn(path.join(root,'bin/quality-check'),['-data',dir,'-gate',path.join(dir,'gate.js'),'-owned'],{stdio:['pipe','pipe','pipe']});
+const binary=path.join(dir,process.platform==='win32'?'quality-check.exe':'quality-check');
+await fs.copyFile(path.join(root,'bin',process.platform==='win32'?'quality-check.exe':'quality-check'),binary);await fs.chmod(binary,0o700);
+const child=spawn(binary,['-data',dir,'-gate',path.join(dir,'gate.js'),'-owned'],{stdio:['pipe','pipe','pipe'],windowsHide:true});
 let output='';
 const info=await new Promise((resolve,reject)=>{child.stdout.on('data',b=>{output+=b;const i=output.indexOf('\n');if(i>=0)resolve(JSON.parse(output.slice(0,i)))});child.once('error',reject)});
 const browser=await chromium.launch({headless:true});
@@ -17,10 +19,12 @@ let badFingerprint=false;
 let manualRun=0, truncated=false;
 let manualSVG;
 let streamAnswer=false;
+const efforts=[];
 const upstream=http.createServer(async(req,res)=>{
- if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo'}]}));return;}
+ if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo',reasoning:true,reasoning_levels:['low','high','max']}]}));return;}
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);const count=Number(body.messages[0].content.match(/ (\d+) 个 1 到 355/)?.[1]);
+ efforts.push(body.reasoning_effort);
  if(streamAnswer && body.stream){
   res.setHeader('Content-Type','text/event-stream');
   res.write('data: '+JSON.stringify({choices:[{index:0,delta:{content:'流式部分回答'}}]})+'\n\n');
@@ -50,11 +54,27 @@ try{
  await page.locator('#config button.primary').click();
  await page.waitForFunction(()=>document.querySelector('#configMessage').textContent.includes('连接成功'));
  assert.equal(await page.locator('#config input[name=gateway_key]').inputValue(),'');
+ assert.equal(await page.locator('#config select[name=gate_mode]').inputValue(),'observe');
+ assert.match(await page.locator('#gateState').textContent(),/仅检测/);
+ await page.locator('#config select[name=gate_mode]').selectOption('strict');
+ await page.locator('#config input[name=gate_agents]').fill('pi');
+ await page.locator('#defaultEffort').selectOption('medium');
+ await page.locator('#config button.primary').click();
+ await page.waitForFunction(()=>document.querySelector('#gateState').textContent.includes('强制门禁 · pi'));
  await page.keyboard.press('Escape');
  assert.equal(await page.locator('#settingsDialog').evaluate(el=>el.open),false);
+ await page.locator('#tab-models').click();await page.locator('#refreshEffort').click();
+ await page.waitForFunction(()=>document.querySelector('#effortState').textContent.includes('该模型支持'));
+ await page.locator('#tab-tests').click();await page.locator('#effort').selectOption('high');
+ assert.match(await page.locator('#effort option').first().textContent(),/跟随默认/);
+ await page.waitForFunction(()=>document.querySelector('#effort').value==='high'&&!document.querySelector('#effort').disabled);
  await page.locator('#run').click();
  assert.match(await page.locator('#testAnswer').textContent(),/等待/);
+ assert.match(await page.locator('#testStatus').textContent(),/最长 360 秒/);
  await page.waitForFunction(()=>document.querySelector('#testAnswer').textContent.includes('回答 1'),{},{timeout:15000});
+ assert.equal(efforts.at(-1),'high','selected reasoning effort did not reach upstream');
+ await page.locator('#effort').selectOption('');
+ await page.waitForFunction(()=>document.querySelector('#effort').value===''&&!document.querySelector('#effort').disabled);
  assert.equal(await page.evaluate(()=>window.answerExecuted),undefined,'executed model HTML');
  assert.equal(await page.locator('#copyAnswer').isEnabled(),true);
  assert.match(await page.locator('#answerAnalysis').textContent(),/逐字覆盖/);
@@ -69,6 +89,7 @@ try{
  await page.locator('#prompt').selectOption('repeat');assert.match(await page.locator('#testAnswer').textContent(),/回答 1/);
  await page.locator('#run').click();
  await page.waitForFunction(()=>document.querySelector('#testAnswer').textContent.includes('回答 2'),{},{timeout:15000});
+ assert.equal(efforts.at(-1),'medium','clearing model effort must restore the global default');
  const firstRecord=await page.locator('#testRecord option').last().getAttribute('value');
  await page.locator('#testRecord').selectOption(firstRecord);assert.match(await page.locator('#testAnswer').textContent(),/回答 1/);
  assert.equal(await page.locator('#answerReview select').inputValue(),'accepted');

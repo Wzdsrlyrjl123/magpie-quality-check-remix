@@ -44,11 +44,24 @@ func traceChallenges() []Result {
 }
 
 func (s *Service) TriggerModelTrace(model string) error {
+	return s.TriggerModelTraceWithEffort(model, "")
+}
+
+// TriggerModelTraceWithEffort runs the fingerprint batch. The effort applies to
+// every challenge in the batch so all three stay comparable.
+func (s *Service) TriggerModelTraceWithEffort(model, effort string) error {
+	level, err := ValidateEffort(effort)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.state.Targets[model]
 	if t == nil {
 		return errors.New("模型未配置")
+	}
+	if level == "" {
+		level = s.effortFor(model)
 	}
 	if s.running[model] {
 		return errors.New("该模型已有检测进行中，请完成后重试")
@@ -73,6 +86,7 @@ func (s *Service) TriggerModelTrace(model string) error {
 	for i := range probes {
 		probes[i].Model = model
 		probes[i].Time = time.Now()
+		probes[i].Effort = level
 	}
 	s.state.Results = append(s.state.Results, probes...)
 	if err := s.store.Save(s.state); err != nil {
@@ -86,10 +100,10 @@ func (s *Service) TriggerModelTrace(model string) error {
 		defer s.wg.Done()
 		defer func() { s.mu.Lock(); delete(s.running, model); s.mu.Unlock() }()
 		for i, r := range probes {
-			ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
-			answer, tokens, err := Call(ctx, cfg, "quality-probe/"+alias+"/"+model, r.PromptText)
+			ctx, cancel := context.WithTimeout(s.ctx, ProbeTimeout(level))
+			answer, tokens, reasoning, err := call(ctx, cfg, "quality-probe/"+alias+"/"+model, r.PromptText, level, nil)
 			cancel()
-			r.Answer, r.Tokens, r.Verdict = answer, tokens, "manual"
+			r.Answer, r.Tokens, r.ReasoningTokens, r.Verdict = answer, tokens, reasoning, "manual"
 			if err != nil {
 				r.Verdict, r.Error = "unavailable", err.Error()
 			}

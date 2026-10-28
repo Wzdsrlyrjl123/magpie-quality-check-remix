@@ -1,6 +1,6 @@
 {
   "name": "magpie-intelligence-check",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
@@ -22,5 +22,15 @@
     "test:magpie": "node scripts/magpie-integration.mjs",
     "test:install": "node scripts/install-check.mjs",
     "test:clients": "node scripts/client-check.mjs"
-  }
+  },
+  "description": "Magpie model quality checks, monitoring and local management console",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wzdsrlyrjl123/magpie-intelligence-check.git"
+  },
+  "homepage": "https://github.com/Wzdsrlyrjl123/magpie-intelligence-check#readme",
+  "bugs": {
+    "url": "https://github.com/Wzdsrlyrjl123/magpie-intelligence-check/issues"
+  },
+  "license": "MIT"
 }

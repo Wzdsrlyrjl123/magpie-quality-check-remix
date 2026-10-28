@@ -52,7 +52,7 @@ func (s *Service) WatchLog() {
 					if file != nil {
 						file.Close()
 					}
-					file, err = os.Open(name)
+					file, err = openLog(name)
 					if err != nil {
 						file = nil
 						continue

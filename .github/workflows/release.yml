@@ -1,0 +1,58 @@
+name: Build and release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check release version and clean initial gate
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+          if (process.env.RELEASE_TAG) assert.equal(process.env.RELEASE_TAG, `v${pkg.version}`);
+          assert.equal((await readFile('plugin/gate.middleware.js', 'utf8')).trim(), 'export function onRequest(body) { return body; }');
+          NODE
+      - name: Test
+        run: |
+          go test -race ./...
+          go vet ./...
+          node --test plugin/*.test.mjs scripts/answer-analysis.test.mjs
+      - name: Build and verify packages
+        run: |
+          node scripts/build-release.mjs
+          node scripts/package-check.mjs
+          node scripts/plugin-check.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: |
+            dist/*.tgz
+            dist/manifest.json
+      - name: Publish tagged release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/*.tgz dist/manifest.json --verify-tag --title "$RELEASE_TAG" --generate-notes

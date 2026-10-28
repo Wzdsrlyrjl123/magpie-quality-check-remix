@@ -32,7 +32,7 @@ func TestDetectionLifecycle(t *testing.T) {
 	}))
 	defer up.Close()
 	s := fixture(t)
-	s.Configure(Config{GatewayURL: up.URL, GatewayKey: "fixture", DailyLimit: 120})
+	s.Configure(Config{GatewayURL: up.URL, GatewayKey: "fixture", DailyLimit: 120, GateMode: "strict"})
 	s.SetTarget("a/solo", true)
 	s.LogLine(`middleware quality-check [info]: MAGPIE_QUALITY_TRIGGER {"model":"a/solo"}`)
 	deadline := time.Now().Add(5 * time.Second)

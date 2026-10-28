@@ -49,9 +49,22 @@ func TestGateAndPersistence(t *testing.T) {
 	}
 }
 func TestGrade(t *testing.T) {
-	for _, tt := range []struct{ a, w string }{{"Answer: **46.24 inches**.", "passed"}, {"46.24 inches is incorrect. Final: 48 inches.", "failed"}, {"48 inches", "failed"}, {"46.24", "passed"}, {"Example: 46.24, but my final answer is 48.", "failed"}} {
+	for _, tt := range []struct{ a, w string }{
+		{"Answer: **46.24 inches**.", "passed"},
+		{"46.24 inches is incorrect. Final: 48 inches.", "failed"},
+		{"48 inches", "failed"},
+		{"46.24", "passed"},
+		{"Example: 46.24, but my final answer is 48.", "failed"},
+		// Strong reasoning levels answer in LaTeX; these were false failures.
+		{`Rounded: \boxed{46.24\text{ inches} \approx 3'10.24''}`, "passed"},
+		{`Thus \[\bar H \approx 46.24264\text{ inches}.\] \boxed{46.24\text{ inches}}`, "passed"},
+		{`\boxed{48\text{ inches}}`, "failed"},
+		{"**46.24** inches", "passed"},
+		{"答案是 46.24 英寸", "passed"},
+		{"`46.24`", "passed"},
+	} {
 		if got := Grade("milk", tt.a); got != tt.w {
-			t.Fatalf("%q: %s", tt.a, got)
+			t.Fatalf("%q: got %s want %s", tt.a, got, tt.w)
 		}
 	}
 }

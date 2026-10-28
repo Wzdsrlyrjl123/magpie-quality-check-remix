@@ -12,7 +12,8 @@ const gatewayServer=http.createServer((req,res)=>{
 });
 const gatewayPort=await new Promise(resolve=>{const reservation=http.createServer();reservation.listen(0,'127.0.0.1',()=>{const port=reservation.address().port;reservation.close(()=>resolve(port));})});
 const gateway=`http://127.0.0.1:${gatewayPort}`;
-const script=`import plugin from ${JSON.stringify('file://'+path.join(dir,'plugin/index.mjs'))};const hooks=await plugin.server({},${JSON.stringify({binaryPath:path.join(root,'bin/quality-check'),dataDir:path.join(dir,'data'),gatewayURL:gateway})});await hooks.config({});const first=await hooks.auth.methods[0].authorize();const second=await hooks.auth.methods[0].authorize();console.log(JSON.stringify({first:first.url,second:second.url}));setInterval(()=>{},1000);`;
+const binaryPath=path.join(root,'bin',process.platform==='win32'?'quality-check.exe':'quality-check');
+const script=`import plugin from ${JSON.stringify('file://'+path.join(dir,'plugin/index.mjs'))};const hooks=await plugin.server({},${JSON.stringify({binaryPath,dataDir:path.join(dir,'data'),gatewayURL:gateway})});await hooks.config({});const first=await hooks.auth.methods[0].authorize();const second=await hooks.auth.methods[0].authorize();console.log(JSON.stringify({first:first.url,second:second.url}));setInterval(()=>{},1000);`;
 const p=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','pipe','pipe']});let raw='';let error='';p.stderr.on('data',b=>error+=b);
 try{
  const v=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('plugin startup timeout '+error)),15000);p.stdout.on('data',b=>{raw+=b;const i=raw.indexOf('\n');if(i>=0){clearTimeout(timer);resolve(JSON.parse(raw.slice(0,i)))}});p.once('exit',()=>{clearTimeout(timer);reject(Error(error))})});

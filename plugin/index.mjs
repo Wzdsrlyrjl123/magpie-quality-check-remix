@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { copyFile, mkdir, readFile, rename, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -11,26 +13,127 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 let child, ready, stopDiscovery;
 function start(options = {}) {
   if (ready) return ready;
-  ready = new Promise((resolve, reject) => {
+
+  let startup;
+  startup = (async () => {
     const platform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform] || process.platform;
     const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch] || process.arch;
     const suffix = platform === 'windows' ? '.exe' : '';
     const bundled = path.join(root, 'bin', `quality-check-${platform}-${arch}${suffix}`);
     const fallback = path.join(root, 'bin', `quality-check${suffix}`);
-    const binary = options.binaryPath || (requireFile(bundled) ? bundled : fallback);
-    const args=['-data', options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check'), '-gate', path.join(root, 'plugin', 'gate.middleware.js'),'-owned'];
-    if(options.cloudflaredPath)args.push('-cloudflared',options.cloudflaredPath);
-    child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    child.stdin.on('error',()=>{});
-    let output = '';
-    const timer = setTimeout(() => { child.kill(); reject(new Error('质量检测后台启动超时')); }, 15000);
-    child.stdout.on('data', b => { output += b; const i = output.indexOf('\n'); if (i >= 0) { try { const v = JSON.parse(output.slice(0, i)); clearTimeout(timer); resolve(v); } catch { reject(new Error('后台启动信息无效')); } } });
-    child.stderr.on('data', () => {});
-    child.once('error', e => { clearTimeout(timer); ready = undefined; reject(new Error(`无法启动 Go 后台，请先构建二进制：${e.message}`)); });
-    child.once('exit', () => { clearTimeout(timer); stopDiscovery?.(); stopDiscovery = undefined; ready = undefined; reject(new Error('检测后台已退出')); });
-  });
-  return ready;
+    const dataDir = path.resolve(options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check'));
+    let binary = options.binaryPath || (requireFile(bundled) ? bundled : fallback);
+
+    // Magpie can install plugins under a restricted directory. Launching an
+    // executable there may give it an integrity label that prevents it from
+    // writing its data files. A per-user runtime copy inherits the data
+    // directory's permissions instead.
+    if (platform === 'windows') binary = await stageWindowsBinary(binary, dataDir);
+
+    const args = ['-data', dataDir, '-gate', path.join(root, 'plugin', 'gate.middleware.js'), '-owned'];
+    if (options.cloudflaredPath) args.push('-cloudflared', options.cloudflaredPath);
+
+    return await new Promise((resolve, reject) => {
+      const process = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      child = process;
+      process.stdin.on('error', () => {});
+      let output = '';
+      let stderr = '';
+      let settled = false;
+      const timer = setTimeout(() => fail(new Error(formatStartupFailure('启动超时', stderr))), 15000);
+
+      function cleanup() {
+        clearTimeout(timer);
+        if (child === process) {
+          child = undefined;
+          stopDiscovery?.();
+          stopDiscovery = undefined;
+          if (ready === startup) ready = undefined;
+        }
+      }
+      function fail(error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+        process.kill();
+      }
+
+      process.stdout.on('data', bytes => {
+        output += bytes;
+        const newline = output.indexOf('\n');
+        if (newline < 0) return;
+        try {
+          const value = JSON.parse(output.slice(0, newline));
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        } catch {
+          fail(new Error(formatStartupFailure('后台启动信息无效', stderr)));
+        }
+      });
+      process.stderr.on('data', bytes => {
+        stderr = (stderr + bytes.toString()).slice(-4000);
+      });
+      process.once('error', error => {
+        cleanup();
+        if (!settled) {
+          settled = true;
+          reject(new Error(formatStartupFailure(`无法启动后台进程：${error.message}`, stderr)));
+        }
+      });
+      process.once('exit', (code, signal) => {
+        cleanup();
+        if (!settled) {
+          settled = true;
+          const reason = code === null ? `进程被终止（${signal || '未知信号'}）` : `进程退出，代码 ${code}`;
+          reject(new Error(formatStartupFailure(reason, stderr)));
+        }
+      });
+    });
+  })();
+
+  ready = startup;
+  startup.catch(() => { if (ready === startup) ready = undefined; });
+  return startup;
 }
+
+function formatStartupFailure(reason, stderr) {
+  const detail = stderr.trim();
+  return `检测后台${reason}${detail ? `：${detail}` : ''}`;
+}
+
+async function stageWindowsBinary(binary, dataDir) {
+  const source = await readFile(binary);
+  const digest = createHash('sha256').update(source).digest('hex');
+  const runtimeDir = path.join(dataDir, 'runtime');
+  const destination = path.join(runtimeDir, `quality-check-${digest}.exe`);
+  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+
+  try {
+    const cached = await readFile(destination);
+    if (createHash('sha256').update(cached).digest('hex') === digest) return destination;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await copyFile(binary, temporary);
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      // Another plugin host may have published the same immutable binary.
+      const cached = await readFile(destination).catch(() => undefined);
+      if (!cached || createHash('sha256').update(cached).digest('hex') !== digest) throw error;
+    }
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+  return destination;
+}
+
 function requireFile(file) {
   return existsSync(file);
 }

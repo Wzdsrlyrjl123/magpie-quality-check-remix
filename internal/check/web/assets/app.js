@@ -4,7 +4,7 @@ import { analyzeAnswer } from './answer-analysis.js';
 import { renderSVGPreview } from './svg-preview.js';
 import { renderHTMLPreview, stopHTMLPreview } from './html-preview.js';
 
-let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
+let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30, routeSignature;
 const config = $('#config');
 const secretType = 'pass' + 'word';
 config.elements.gateway_key.type = secretType;
@@ -98,12 +98,185 @@ function requireGateway() {
   return false;
 }
 function modelRunning(model) { return data?.state.results?.some(r => r.model === model && r.verdict === 'running'); }
+
+// Reasoning effort. The gateway publishes supported levels per model; an empty
+// selection means "let Magpie decide" and sends no reasoning_effort field.
+const EFFORT_LABELS = { low: '低 low', medium: '中 medium', high: '高 high', xhigh: '很高 xhigh', max: '最大 max', ultra: '极限 ultra' };
+const effortLabel = level => EFFORT_LABELS[level] || level;
+const knownLevels = () => data?.effort_levels || ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+function targetOf(model) { return data?.state.targets?.[model]; }
+function levelsFor(model) {
+  const levels = targetOf(model)?.levels;
+  return levels && levels.length ? levels : knownLevels();
+}
+function effortFor(model) {
+  const target = targetOf(model);
+  return target?.effort || data?.state.config.effort || '';
+}
+function effortReason(model) {
+  const target = targetOf(model);
+  if (!target) return '';
+  const levels = target.levels || [];
+  const chosen = effortFor(model);
+  if (target.reasoning === false) return '该模型在网关中没有思考能力标记，发送强度可能被忽略。';
+  if (!levels.length) return '网关未公布该模型的思考档位；请用“读取模型能力”同步。';
+  if (chosen && !levels.includes(chosen)) return `当前强度 ${effortLabel(chosen)} 不在该模型支持的 ${levels.map(effortLabel).join(' / ')} 中，Magpie 会回落到最接近的档位。`;
+  return `该模型支持：${levels.map(effortLabel).join(' / ')}。`;
+}
+// Keep inheritance distinct from an explicit override of the same level.
+function fillEffort(select, model, extraInherit) {
+  const levels = levelsFor(model);
+  const options = [['', extraInherit || '跟随默认设置'], ...levels.map(level => [level, effortLabel(level)])];
+  const current = targetOf(model)?.effort || '';
+  if (current && !levels.includes(current)) options.push([current, `${effortLabel(current)}（模型不支持）`]);
+  syncSelect(select, options);
+  select.value = current;
+}
+function renderEffort() {
+  const model = $('#model').value;
+  fillEffort($('#effort'), model, '跟随默认设置');
+  $('#effortState').textContent = model ? effortReason(model) : '';
+  $('#effortState').className = 'inline-state';
+  const traceModel = $('#traceModel').value;
+  fillEffort($('#traceEffort'), traceModel, '跟随默认设置');
+  $('#traceEffortState').textContent = traceModel ? effortReason(traceModel) : '';
+  $('#traceEffortState').className = 'inline-state';
+}
+// persistEffort stores the level for one model and re-renders from the server.
+async function persistEffort(model, effort, select) {
+  if (!model) return;
+  select.disabled = true;
+  try {
+    await request('/api/effort', { model, effort });
+    feedback(`${model}：思考强度已设为 ${effort ? effortLabel(effort) : '跟随默认设置'}`, true);
+    await refresh();
+  } catch (error) { feedback(error.message); }
+  finally { select.disabled = false; renderControls(); }
+}
 function renderControls() {
   if (!data) return;
   $('#run').disabled = $('#run').hasAttribute('aria-busy') || !$('#model').value || modelRunning($('#model').value);
+  $('#routeRun').disabled = $('#routeRun').hasAttribute('aria-busy') || !$('#routeModel').value.trim() || routeRunning($('#routeModel').value.trim());
   renderTestAnswer();
   renderModelTrace(data);
+  // renderModelTrace fills the trace model list, so effort reads it afterwards.
+  renderEffort();
+  renderRoutes();
 }
+const routeRunning = model => (data?.route_running || []).includes(model);
+const fmtMS = ms => (!ms && ms !== 0) ? '—' : ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms';
+function renderRoutes() {
+  if (!data) return;
+  const records = [...(data.state.routes || [])].reverse();
+  $('#usagePathLabel').textContent = data.usage_path || '';
+  const running = data.route_running || [];
+  const signature = JSON.stringify([records, running]);
+  if (signature === routeSignature) return;
+  routeSignature = signature;
+  syncSelect($('#routeEffort'), [['', '跟随默认设置'], ...knownLevels().map(level => [level, effortLabel(level)])]);
+  const rows = records.map(record => {
+    const row = document.createElement('tr');
+    const target = text('td', '', 'model-id');
+    target.dataset.label = '请求的模型';
+    target.append(text('div', record.model));
+    target.append(text('span', dateTime(record.time) + (record.effort ? ' / ' + effortLabel(record.effort) : '') + (record.direct ? ' / 直连（门禁未生效）' : ''), 'cell-meta'));
+    const actual = record.served || record.body_model || '';
+    const served = text('td', '');
+    served.dataset.label = '实际交付';
+    if (actual) {
+      const same = actual === record.model;
+      served.append(text('div', actual, 'route-actual ' + (same ? 'match' : 'diff')));
+      served.append(text('span', same ? '与请求一致' : '与请求不同', 'cell-meta'));
+    } else {
+      served.append(text('span', record.error || '未取得回执', 'route-actual unknown'));
+    }
+    const provider = text('td', record.provider || '—', '');
+    provider.dataset.label = '渠道';
+    const cost = text('td', fmtMS(record.ms), 'numeric');
+    cost.dataset.label = '耗时';
+    const tokens = text('td', record.tokens ? record.tokens + ' tokens' : '—', 'numeric');
+    tokens.dataset.label = '用量';
+    const claim = text('td', record.self_claim || (record.error ? record.error : '—'), 'cell-claim');
+    claim.dataset.label = '模型自述';
+    row.append(target, served, provider, cost, tokens, claim);
+    return row;
+  });
+  if (!rows.length) {
+    const row = text('tr', '', 'empty-row');
+    const message = running.length ? `正在核对 ${running.join('、')}，结果稍后出现。` : '还没有核对记录。填入完整模型 ID 后点「核对当前路由」。';
+    const cell = text('td', message, 'empty-state');
+    cell.colSpan = 6; row.append(cell); rows.push(row);
+  }
+  $('#routeResults').replaceChildren(...rows);
+}
+function changeRoute() { $('#routeStatus').textContent = ''; renderControls(); }
+$('#routeModel').oninput = changeRoute;
+$('#routeEffort').onchange = changeRoute;
+$('#routeRun').onclick = () => pending($('#routeRun'), async () => {
+  if (!requireGateway()) return;
+  const model = $('#routeModel').value.trim();
+  $('#routeStatus').textContent = `正在向 ${model} 发送一次探测请求…`;
+  await request('/api/route/check', { model, effort: $('#routeEffort').value });
+  feedback('已开始核对路由', true);
+  await refresh();
+  $('#routeStatus').textContent = routeRunning(model) ? '核对进行中，结果会稍后出现在下表。' : '';
+});
+$('#routeClear').onclick = () => pending($('#routeClear'), async () => {
+  if (!(data?.state.routes || []).length) return;
+  if (!confirm('清理全部路由核对结果？网关请求日志与质量检测记录不受影响。')) return;
+  await request('/api/route/clear', {});
+  feedback('路由核对结果已清理', true);
+  await refresh();
+});
+$('#routeExport').onclick = () => {
+  if (!data) return;
+  const payload = { exported_at: new Date().toISOString(), routes: data.state.routes || [] };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = 'intelligence-check-routes.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+async function loadUsage() {
+  const button = $('#usageLoad');
+  button.disabled = true;
+  try {
+    const result = await request('/api/usage?limit=200');
+    const rows = result.rows || [];
+    $('#usagePathLabel').textContent = result.path || '';
+    const cells = rows.map(entry => {
+      const row = document.createElement('tr');
+      const raw = entry.t || '';
+      const when = raw ? new Date(raw).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
+      const served = entry.served || '';
+      const diff = served && entry.req && served !== entry.req;
+      const status = entry.status ? String(entry.status) : '—';
+      const statusCell = text('td', status + (entry.err ? ' / ' + entry.err.slice(0, 40) : ''), 'numeric' + (status.startsWith('2') ? '' : ' error-text'));
+      row.append(
+        text('td', when, 'numeric'),
+        text('td', entry.agent || '—', ''),
+        text('td', entry.req || '—', 'model-id'),
+        text('td', served || '—', 'route-actual ' + (diff ? 'diff' : 'match')),
+        text('td', entry.provider || '—', ''),
+        text('td', entry.account || '—', ''),
+        statusCell,
+      );
+      return row;
+    });
+    if (!cells.length) {
+      const row = text('tr', '', 'empty-row');
+      const cell = text('td', '请求日志里没有可用记录', 'empty-state');
+      cell.colSpan = 7; row.append(cell); cells.push(row);
+    }
+    $('#usageRows').replaceChildren(...cells);
+    feedback(`已读取 ${rows.length} 条请求回执`, true);
+  } catch (error) {
+    const row = text('tr', '', 'empty-row');
+    const cell = text('td', error.message, 'empty-state');
+    cell.colSpan = 7; row.append(cell); $('#usageRows').replaceChildren(row);
+    feedback(error.message);
+  } finally { button.disabled = false; }
+}
+$('#usageLoad').onclick = loadUsage;
 function renderTestAnswer() {
   if (!data) return;
   const model = $('#model').value, prompt = $('#prompt').value;
@@ -118,9 +291,13 @@ function renderTestAnswer() {
   $('#cancelTest').hidden = !data.state.results.some(r => r.model === model && r.verdict === 'running' && r.prompt !== 'modeltrace');
   const answer = record?.answer || '';
   const elapsed = record ? Math.max(0, Math.floor((Date.now() - Date.parse(record.time)) / 1000)) : 0;
-  $('#testStatus').textContent = running ? `检测进行中，已等待 ${elapsed} 秒（最长 180 秒）。` : record ? record.verdict === 'unavailable' ? '检测未完成' : '检测完成' : modelRunning(model) ? '该模型正在运行其他检测。' : '';
+  const runningEffort = record?.effort || effortFor(model);
+  const timeout = ['xhigh', 'max', 'ultra'].includes(runningEffort) ? 540 : runningEffort === 'high' ? 360 : 240;
+  $('#testStatus').textContent = running ? `检测进行中，已等待 ${elapsed} 秒（最长 ${timeout} 秒）。` : record ? record.verdict === 'unavailable' ? '检测未完成' : '检测完成' : modelRunning(model) ? '该模型正在运行其他检测。' : '';
   $('#testStatus').className = 'inline-state' + (record?.verdict === 'unavailable' ? ' error' : '');
-  $('#answerMeta').textContent = record ? `${record.model} / ${dateTime(record.time)} / ${names[record.verdict] || record.verdict} / ${record.tokens || 0} tokens` : model ? `${model} / ${data.prompts.find(p => p.id === prompt)?.name || ''}` : '尚未选择测试模型';
+  const effortNote = record?.effort ? ` / 强度 ${effortLabel(record.effort)}` : ' / 强度未指定';
+  const reasoningNote = record?.reasoning_tokens ? ` / 思考 ${record.reasoning_tokens}` : '';
+  $('#answerMeta').textContent = record ? `${record.model} / ${dateTime(record.time)} / ${names[record.verdict] || record.verdict} / ${record.tokens || 0} tokens${reasoningNote}${effortNote}` : model ? `${model} / ${data.prompts.find(p => p.id === prompt)?.name || ''}` : '尚未选择测试模型';
   $('#answerError').hidden = !record?.error && !submissionError;
   $('#answerError').textContent = submissionError || record?.error || '';
   const content = answer || (running ? '正在等待模型回答…' : record ? record.error ? '本次请求未返回回答正文。' : '本次回答为空。' : '当前模型和题目暂无回答');
@@ -164,7 +341,8 @@ function dayCount(model) {
 function validPass(target) { return target.enabled && target.state === 'passed' && Date.now() - Date.parse(target.checked_at) < 900000; }
 function renderTargets() {
   const targets = Object.values(data.state.targets);
-  const signature = JSON.stringify([targets, data.state.results.filter(r => r.verdict === 'running').map(r => r.model), data.state.config.daily_limit, targets.map(t => [dayCount(t.model), validPass(t), Date.parse(t.allow_until) > Date.now()])]);
+  const strict = data.state.config.gate_mode === 'strict';
+  const signature = JSON.stringify([targets, strict, data.state.results.filter(r => r.verdict === 'running').map(r => r.model), data.state.config.daily_limit, data.state.config.effort, targets.map(t => [dayCount(t.model), validPass(t), Date.parse(t.allow_until) > Date.now()])]);
   if (signature === targetSignature) return;
   targetSignature = signature;
   const rows = targets.map(target => {
@@ -174,9 +352,19 @@ function renderTargets() {
     const status = text('td', '');
     status.dataset.label = '状态';
     const allowed = Date.parse(target.allow_until) > Date.now();
-    const label = !target.enabled ? '监测关闭' : allowed ? '限时放行' : target.state === 'passed' && !validPass(target) ? '通过已过期' : names[target.state] || target.state;
+    const label = !target.enabled ? '监测关闭' : allowed ? (strict ? '限时放行' : '自动检测暂缓') : target.state === 'passed' && !validPass(target) ? '通过已过期' : names[target.state] || target.state;
     status.append(text('span', label, 'state ' + (target.enabled ? target.state : '')));
     if (target.reason) status.append(text('span', target.reason, 'cell-meta'));
+    const effortCell = text('td', '');
+    effortCell.dataset.label = '思考强度';
+    const select = document.createElement('select');
+    select.className = 'effort-select';
+    select.setAttribute('aria-label', `${target.model} 的思考强度`);
+    fillEffort(select, target.model, `跟随默认${data.state.config.effort ? '（' + effortLabel(data.state.config.effort) + '）' : ''}`);
+    select.onchange = () => persistEffort(target.model, select.value, select);
+    effortCell.append(select);
+    if (target.reasoning === false) effortCell.append(text('span', '网关报告该模型无思考能力', 'cell-meta'));
+    else if (target.levels?.length && select.value && !target.levels.includes(select.value)) effortCell.append(text('span', '模型不支持该档位，Magpie 会就近取档', 'cell-meta'));
     const checked = text('td', dateTime(target.checked_at));
     checked.dataset.label = '最近通过';
     const budget = text('td', `${dayCount(target.model)} / ${data.state.config.daily_limit}`, 'numeric');
@@ -184,7 +372,7 @@ function renderTargets() {
     const actions = text('td', '');
     actions.dataset.label = '操作';
     const tools = text('div', '', 'actions');
-    for (const [name, action, image] of [['重新检测', 'test', 'RefreshCw'], ['放行 15 分钟', 'allow', 'Clock3'], ['暂停', 'hold', 'Pause']]) {
+    for (const [name, action, image] of [['重新检测', 'test', 'RefreshCw'], [strict ? '放行 15 分钟' : '暂缓自动检测 15 分钟', 'allow', 'Clock3'], [strict ? '暂停' : '标记待确认', 'hold', 'Pause']]) {
       const button = text('button', '', 'icon-button');
       button.type = 'button'; button.append(icon(image));
       button.setAttribute('aria-label', `${name} ${target.model}`);
@@ -193,7 +381,7 @@ function renderTargets() {
       button.onclick = () => pending(button, async () => {
         if (action === 'test' && !requireGateway()) return;
         await request('/api/action', { model: target.model, action });
-        feedback(`${target.model}：${action === 'test' ? '已开始检测' : action === 'allow' ? '已放行 15 分钟' : '已暂停'}`, true);
+        feedback(`${target.model}：${action === 'test' ? '已开始检测' : action === 'allow' ? (strict ? '已放行 15 分钟' : '自动检测已暂缓 15 分钟，业务继续通过') : (strict ? '已暂停' : '已标记待确认，业务继续通过')}`, true);
         await refresh();
       });
       tools.append(button);
@@ -215,11 +403,11 @@ function renderTargets() {
       pending(remove, async () => { await request('/api/target/delete', { model: target.model }); feedback('已删除监测目标，历史记录保留', true); await refresh(); });
     };
     tools.append(remove);
-    row.append(model, status, checked, budget, actions);
+    row.append(model, status, effortCell, checked, budget, actions);
     return row;
   });
   if (!rows.length) {
-    const row = text('tr', '', 'empty-row'); const cell = text('td', '添加一个模型开始监测', 'empty-state'); cell.colSpan = 5; row.append(cell); rows.push(row);
+    const row = text('tr', '', 'empty-row'); const cell = text('td', '添加一个模型开始监测', 'empty-state'); cell.colSpan = 6; row.append(cell); rows.push(row);
   }
   $('#targets').replaceChildren(...rows);
 }
@@ -247,6 +435,8 @@ function renderHistory() {
     const body = text('div', '', 'record-body');
     if (record.error) body.append(text('p', record.error, 'inline-state error'));
     if (record.review) body.append(text('p', `人工审核：${({accepted:'确认通过', rejected:'标记问题', pending:'待确认'})[record.review]}${record.review_note ? ' / ' + record.review_note : ''}`, 'inline-state'));
+    const effortMeta = [record.effort ? `强度 ${effortLabel(record.effort)}` : '强度未指定', record.reasoning_tokens ? `思考 ${record.reasoning_tokens} tokens` : ''].filter(Boolean).join(' / ');
+    body.append(text('p', effortMeta, 'meta'));
     body.append(text('pre', record.answer || (record.verdict === 'running' ? '等待回答' : '未返回回答正文')));
     const download = text('a', '下载原始回答', 'download'); download.prepend(icon('Download'));
     download.href = '/api/results/' + encodeURIComponent(record.id) + '/download'; body.append(download);
@@ -277,7 +467,22 @@ async function refresh() {
     $('#connectionNotice').hidden = data.gateway_configured;
     $('#keyState').textContent = data.gateway_configured ? 'Key 已保存；留空保留已保存的 Key。' : '尚未保存 Key；本机默认 Key 为 magpie。';
     $('#logHealth').textContent = data.log_health;
-    if (!configDirty) for (const key of ['gateway_url', 'log_path', 'daily_limit']) config.elements[key].value = data.state.config[key];
+    $('#usageHealth').textContent = data.usage_health + (data.usage_path ? '：' + data.usage_path : '');
+    const gateStrict = data.state.config.gate_mode === 'strict';
+    const gateScope = data.state.config.gate_agents || '全部 harness';
+    $('#gateState').textContent = gateStrict
+      ? `强制门禁 · ${gateScope}：未检测、检测中、异常或过期时会拒绝请求。其他客户端可在设置中排除。`
+      : `仅检测 · ${gateScope}：业务请求继续通过，后台检测结果供参考；人工暂停也不会阻断业务。`;
+    if (!configDirty) {
+      for (const key of ['gateway_url', 'log_path', 'daily_limit', 'usage_path']) config.elements[key].value = data.state.config[key] || '';
+      syncSelect(config.elements.effort, [['', '不指定（交给 Magpie）'], ...knownLevels().map(level => [level, effortLabel(level)])]);
+      config.elements.effort.value = data.state.config.effort || '';
+      config.elements.gate_mode.value = data.state.config.gate_mode || 'observe';
+      config.elements.gate_agents.value = data.state.config.gate_agents || '';
+      $('#effortHint').textContent = data.state.config.effort
+        ? `所有未单独设置的模型使用 ${effortLabel(data.state.config.effort)}；探针请求会发送 reasoning_effort。`
+        : '不指定时不发送 reasoning_effort，由 Magpie 和各上游使用自己的默认强度。';
+    }
     const targets = Object.values(data.state.targets);
     $('#targetCount').textContent = targets.length;
     $('#statEnabled').textContent = targets.filter(t => t.enabled).length;
@@ -298,6 +503,17 @@ function changeTest() { $('#testRecord').value = ''; showPrompt(); renderControl
 $('#prompt').onchange = changeTest;
 $('#model').onchange = changeTest;
 $('#testRecord').onchange = renderTestAnswer;
+// Picking a level stores it for this model and applies to every later run.
+$('#effort').onchange = () => persistEffort($('#model').value, $('#effort').value, $('#effort'));
+$('#traceEffort').onchange = () => persistEffort($('#traceModel').value, $('#traceEffort').value, $('#traceEffort'));
+$('#refreshEffort').onclick = () => pending($('#refreshEffort'), async () => {
+  if (!requireGateway()) return;
+  const result = await request('/api/effort/discover', {});
+  feedback(result.missing?.length
+    ? `已更新 ${result.updated} 个模型的思考档位；网关未列出：${result.missing.join('、')}`
+    : `已更新 ${result.updated} 个模型的思考档位`, !result.missing?.length);
+  await refresh();
+});
 $('#answerReview').oninput = () => { reviewDirty = true; };
 $('#answerReview').onsubmit = event => {
   event.preventDefault();
@@ -336,9 +552,10 @@ $('#run').onclick = () => pending($('#run'), async () => {
   testErrors.delete(JSON.stringify([model, prompt]));
   awaitingTest = { model, prompt, ids: new Set(data.state.results.map(r => r.id)) };
   $('#testRecord').value = ''; renderTestAnswer();
+  const level = effortFor(model);
   try {
     await request('/api/action', { model, action: 'test', prompt });
-    feedback('已开始检测', true); await refresh();
+    feedback(`已开始检测（强度 ${level ? effortLabel(level) : '未指定'}）`, true); await refresh();
   } catch (error) {
     awaitingTest = undefined;
     testErrors.set(JSON.stringify([model, prompt]), error.message);
@@ -370,8 +587,7 @@ $('#target').onsubmit = event => {
 };
 async function saveConfig() {
   const values = Object.fromEntries(new FormData(config)); values.daily_limit = Number(values.daily_limit);
-  await request('/api/config', values);
-  config.elements.gateway_key.value = ''; config.elements.gateway_key.type = secretType;
+  await request('/api/config', values);  config.elements.gateway_key.value = ''; config.elements.gateway_key.type = secretType;
   $('#showKey').replaceChildren(icon('Eye'));
   $('#showKey').setAttribute('aria-label', '显示输入的 Key');
   $('#showKey').dataset.tooltip = '显示输入的 Key';

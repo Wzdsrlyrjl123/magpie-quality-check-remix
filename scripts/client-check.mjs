@@ -15,9 +15,9 @@ const server=http.createServer(async(req,res)=>{
  res.end(JSON.stringify({type:'error',error:{type:'permission_error',message:marker}}));
 });await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
 async function run(binary,args,env){
- const p=spawn(binary,args,{cwd:dir,env:{...process.env,HOME:dir,...env},stdio:['ignore','pipe','pipe']});let out='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>out+=b);
+ const p=spawn(binary,args,{cwd:dir,env:{...process.env,HOME:dir,USERPROFILE:dir,...env},stdio:['ignore','pipe','pipe'],windowsHide:true});let out='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>out+=b);
  const timer=setTimeout(()=>p.kill('SIGKILL'),45000);
- const result=await new Promise((resolve,reject)=>{p.once('error',reject);p.once('exit',(code,signal)=>resolve({code,signal,out}))});clearTimeout(timer);return result;
+ try{return await new Promise((resolve,reject)=>{p.once('error',reject);p.once('close',(code,signal)=>resolve({code,signal,out}))});}finally{clearTimeout(timer);}
 }
 try{
  const before=calls;
@@ -26,4 +26,4 @@ try{
  const prior=calls;
  const claude=await run(process.env.CLAUDE_BINARY||'claude',['--bare','-p','--model','fixture/solo','--tools','','--setting-sources','','Reply hello'],{ANTHROPIC_BASE_URL:base,ANTHROPIC_API_KEY:'fixture',CLAUDE_CONFIG_DIR:path.join(dir,'claude'),CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1'});
  assert.ok(calls>prior,'Claude did not call fixture');assert.match(claude.out,/MAGPIE_QUALITY_REVIEW_REQUIRED/);assert.notEqual(claude.code,0);console.log('PASS: Claude Code displays quality gate API error and exits unsuccessfully');
-}finally{server.close();await fs.rm(dir,{recursive:true,force:true})}
+}finally{await new Promise(resolve=>server.close(resolve));await fs.rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:200})}

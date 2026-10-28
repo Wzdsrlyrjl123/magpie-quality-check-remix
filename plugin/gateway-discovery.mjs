@@ -30,7 +30,13 @@ export async function discoverGateway(options = {}, env = process.env, fetcher =
     if (!response.ok) return undefined;
     const data = await response.json();
     if (!Array.isArray(data.data)) return undefined;
-    return { gateway_url: url, gateway_key: key, log_path: options.logPath || '', daily_limit: 120 };
+    const config = { gateway_url: url, gateway_key: key, log_path: options.logPath || '', daily_limit: 120 };
+    config.gate_mode = options.gateMode || 'observe';
+    config.gate_agents = options.gateAgents || '';
+    // Only a validated level is forwarded; anything else stays unset so the
+    // gateway keeps its own default.
+    if (typeof options.effort === 'string' && options.effort.trim()) config.effort = options.effort.trim().toLowerCase();
+    return config;
   } catch { return undefined; }
 }
 

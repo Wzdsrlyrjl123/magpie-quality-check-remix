@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +20,45 @@ type Config struct {
 	GatewayKey string `json:"gateway_key"`
 	LogPath    string `json:"log_path"`
 	DailyLimit int    `json:"daily_limit"`
+	// Effort is the default reasoning effort for every probe. An empty value
+	// leaves the choice to Magpie and the upstream provider.
+	Effort     string `json:"effort"`
+	GateMode   string `json:"gate_mode"`
+	GateAgents string `json:"gate_agents"`
+	// UsagePath is Magpie's request log (usage.jsonl), used to read back the
+	// real req → served routing. Empty means the default Magpie location.
+	UsagePath string `json:"usage_path,omitempty"`
 }
+
+var gateAgentID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+func normalizeGateConfig(c *Config) error {
+	c.GateMode = strings.ToLower(strings.TrimSpace(c.GateMode))
+	if c.GateMode == "" {
+		c.GateMode = "observe"
+	}
+	if c.GateMode != "observe" && c.GateMode != "strict" {
+		return errors.New("检测模式须为 observe（仅检测）或 strict（强制门禁）")
+	}
+	if len(c.GateAgents) > 512 {
+		return errors.New("harness 范围不能超过 512 字节")
+	}
+	agents, seen := []string{}, map[string]bool{}
+	for _, agent := range strings.FieldsFunc(strings.ToLower(c.GateAgents), func(r rune) bool {
+		return r == ',' || r == '，' || r == ';' || r == '；' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		if !gateAgentID.MatchString(agent) {
+			return fmt.Errorf("无效 harness 标识 %q；请填写 Magpie 的 agent 标识，例如 pi、codex", agent)
+		}
+		if !seen[agent] {
+			agents = append(agents, agent)
+			seen[agent] = true
+		}
+	}
+	c.GateAgents = strings.Join(agents, ",")
+	return nil
+}
+
 type Target struct {
 	Model      string    `json:"model"`
 	Enabled    bool      `json:"enabled"`
@@ -29,6 +68,12 @@ type Target struct {
 	RetryAfter time.Time `json:"retry_after"`
 	Reason     string    `json:"reason"`
 	Event      string    `json:"event"`
+	// Effort overrides Config.Effort for this model; empty inherits the default.
+	Effort string `json:"effort,omitempty"`
+	// Levels and Reasoning mirror the gateway's /v1/models metadata so the
+	// console can offer only supported values and reject impossible ones.
+	Levels    []string `json:"levels,omitempty"`
+	Reasoning *bool    `json:"reasoning,omitempty"`
 }
 type Result struct {
 	ID            string    `json:"id"`
@@ -45,6 +90,10 @@ type Result struct {
 	Review        string    `json:"review,omitempty"`
 	ReviewNote    string    `json:"review_note,omitempty"`
 	ReviewedAt    time.Time `json:"reviewed_at,omitempty"`
+	// Effort is the reasoning effort actually sent with this request.
+	Effort string `json:"effort,omitempty"`
+	// ReasoningTokens is the slice of Tokens the provider spent thinking.
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 func (s *Service) ReviewResult(id, decision, note string) error {
@@ -97,6 +146,7 @@ type State struct {
 	Config       Config                    `json:"config"`
 	Targets      map[string]*Target        `json:"targets"`
 	Results      []Result                  `json:"results"`
+	Routes       []RouteCheck              `json:"routes,omitempty"`
 	Alias        string                    `json:"alias"`
 	ClearedUsage map[string]map[string]int `json:"cleared_usage,omitempty"`
 }
@@ -140,6 +190,7 @@ type Service struct {
 	state        State
 	dir, gate    string
 	running      map[string]bool
+	routeRunning map[string]bool
 	testCancels  map[string]context.CancelFunc
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -164,10 +215,14 @@ func New(dir, gate string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{dir: dir, gate: gate, store: store, running: map[string]bool{}}
+	s := &Service{dir: dir, gate: gate, store: store, running: map[string]bool{}, routeRunning: map[string]bool{}}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.state = State{Config: Config{DailyLimit: 120}, Targets: map[string]*Target{}, Results: []Result{}, Alias: Secret()}
 	if err := store.Load(&s.state); err != nil {
+		store.Close()
+		return nil, err
+	}
+	if err := normalizeGateConfig(&s.state.Config); err != nil {
 		store.Close()
 		return nil, err
 	}
@@ -219,22 +274,33 @@ func (s *Service) saveLocked() error {
 	}
 	b, _ := json.Marshal(s.state.Targets)
 	a, _ := json.Marshal(s.state.Alias)
+	mode, _ := json.Marshal(s.state.Config.GateMode)
+	agents := []string{}
+	if s.state.Config.GateAgents != "" {
+		agents = strings.Split(s.state.Config.GateAgents, ",")
+	}
+	scope, _ := json.Marshal(agents)
 	// Rewrite the entrypoint: Magpie does not watch imported modules.
 	code := fmt.Sprintf(`const targets=%s;
 const alias=%s;
+const gateMode=%s;
+const gateAgents=%s;
 export function onRequest(body,ctx){
  if(typeof body.model!=="string")return body;
  const prefix="quality-probe/"+alias+"/";
  if(body.model.startsWith(prefix)){body.model=body.model.slice(prefix.length);return body;}
  const t=targets[body.model];if(!t||!t.enabled)return body;
+ const agent=typeof ctx.agent==="string"?ctx.agent.toLowerCase():"";
+ if(gateAgents.length&&gateAgents.indexOf(agent)<0)return body;
  const now=Date.now();
  if(Date.parse(t.allow_until)>now)return body;
  if(t.state==="passed"&&now-Date.parse(t.checked_at)<900000)return body;
  if(t.state!=="review"&&t.state!=="checking"&&!(Date.parse(t.retry_after)>now))console.log("MAGPIE_QUALITY_TRIGGER "+JSON.stringify({model:body.model}));
+ if(gateMode!=="strict")return body;
  const status=t.state==="review"?"需要人工确认":t.state==="checking"?"检测进行中，请稍后重试":"需要检测；自动触发依赖可用日志源，请查看检测控制台";
  return ctx.reject(403,"[MAGPIE_QUALITY_REVIEW_REQUIRED] "+status+"。本次请求未发往上游。目标："+body.model+"；原因："+(t.reason||"首次使用或检测已过期")+"；事件："+(t.event||"无")+"。请重新检测、限时放行或切换模型。");
 }
-`, b, a)
+`, b, a, mode, scope)
 	if err := AtomicWrite(s.gate, []byte(code)); err != nil {
 		s.health = "门禁发布失败：" + err.Error()
 		return err
@@ -263,6 +329,12 @@ func (s *Service) ConfigureInitial(c Config) error {
 	if s.state.Config.GatewayURL != "" {
 		return nil
 	}
+	effort, err := ValidateEffort(c.Effort)
+	if err != nil {
+		// A bad option from the plugin must not block connecting.
+		effort = ""
+	}
+	c.Effort = effort
 	return s.configureLocked(c)
 }
 func (s *Service) configureLocked(c Config) error {
@@ -278,9 +350,48 @@ func (s *Service) configureLocked(c Config) error {
 	if c.GatewayKey == "" {
 		return errors.New("请输入 Magpie 网关 Key；本机默认 Key 为 magpie")
 	}
+	effort, err := ValidateEffort(c.Effort)
+	if err != nil {
+		return err
+	}
+	c.Effort = effort
+	if err := normalizeGateConfig(&c); err != nil {
+		return err
+	}
 	s.state.Config = c
 	return s.saveLocked()
 }
+
+// SetEffort stores the reasoning effort for one model, or the default when
+// model is empty. Targets that do not override inherit the default.
+func (s *Service) SetEffort(model, effort string) error {
+	level, err := ValidateEffort(effort)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if model == "" {
+		s.state.Config.Effort = level
+		return s.saveLocked()
+	}
+	t := s.state.Targets[model]
+	if t == nil {
+		return errors.New("模型未配置")
+	}
+	t.Effort = level
+	return s.saveLocked()
+}
+
+// effortFor resolves the reasoning effort a probe for this model would send.
+// Callers must hold s.mu.
+func (s *Service) effortFor(model string) string {
+	if t := s.state.Targets[model]; t != nil && t.Effort != "" {
+		return t.Effort
+	}
+	return s.state.Config.Effort
+}
+
 func (s *Service) SetTarget(model string, enabled bool) error {
 	if model == "" || len(model) > 512 || strings.ContainsAny(model, "\r\n") || strings.HasPrefix(model, "quality-probe/") {
 		return errors.New("无效模型 ID")
@@ -317,11 +428,24 @@ func (s *Service) Action(model, action string) error {
 	return s.saveLocked()
 }
 func (s *Service) Trigger(model, prompt string, manual bool) error {
+	return s.TriggerWithEffort(model, prompt, manual, "")
+}
+
+// TriggerWithEffort starts a probe. A non-empty effort overrides the target and
+// global settings for this run only; it is validated but not persisted.
+func (s *Service) TriggerWithEffort(model, prompt string, manual bool, effort string) error {
+	level, err := ValidateEffort(effort)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.state.Targets[model]
 	if t == nil {
 		return errors.New("模型未配置")
+	}
+	if level == "" {
+		level = s.effortFor(model)
 	}
 	if !t.Enabled && !manual {
 		return nil
@@ -345,14 +469,7 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	if s.state.Config.GatewayURL == "" || s.state.Config.GatewayKey == "" {
 		return errors.New("请配置 Magpie 网关 URL 和 Key")
 	}
-	count := 0
-	day := time.Now().UTC().Format("2006-01-02")
-	count += s.state.ClearedUsage[day][model]
-	for _, r := range s.state.Results {
-		if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
-			count++
-		}
-	}
+	count := s.dayCountLocked(model)
 	if count >= s.state.Config.DailyLimit {
 		return errors.New("每日请求预算已耗尽")
 	}
@@ -370,10 +487,10 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	if s.testCancels == nil {
 		s.testCancels = make(map[string]context.CancelFunc)
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, ProbeTimeout(level))
 	s.testCancels[model] = cancel
 	s.wg.Add(1)
-	go s.run(ctx, model, p)
+	go s.run(ctx, model, p, level)
 	return nil
 }
 func (s *Service) CancelTest(model string) error {
@@ -386,28 +503,21 @@ func (s *Service) CancelTest(model string) error {
 	cancel()
 	return nil
 }
-func (s *Service) run(ctx context.Context, model string, p Prompt) {
+func (s *Service) run(ctx context.Context, model string, p Prompt, effort string) {
 	defer s.wg.Done()
 	verdict, reason := "unavailable", ""
 	for attempt := 0; attempt < 2; attempt++ {
 		s.mu.Lock()
 		cfg := s.state.Config
 		alias := s.state.Alias
-		count := 0
-		day := time.Now().UTC().Format("2006-01-02")
-		count += s.state.ClearedUsage[day][model]
-		for _, r := range s.state.Results {
-			if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
-				count++
-			}
-		}
+		count := s.dayCountLocked(model)
 		if count >= cfg.DailyLimit {
 			s.mu.Unlock()
 			verdict = "unavailable"
 			reason = "每日请求预算已耗尽"
 			break
 		}
-		r := Result{ID: Secret()[:12], Model: model, Prompt: p.ID, PromptText: p.Text, Time: time.Now(), Verdict: "running"}
+		r := Result{ID: Secret()[:12], Model: model, Prompt: p.ID, PromptText: p.Text, Time: time.Now(), Verdict: "running", Effort: effort}
 		s.state.Results = append(s.state.Results, r)
 		idx := len(s.state.Results) - 1
 		err := s.store.Save(s.state)
@@ -416,13 +526,14 @@ func (s *Service) run(ctx context.Context, model string, p Prompt) {
 			reason = err.Error()
 			break
 		}
-		answer, tokens, err := call(ctx, cfg, "quality-probe/"+alias+"/"+model, p.Text, func(partial string) {
+		answer, tokens, reasoning, err := call(ctx, cfg, "quality-probe/"+alias+"/"+model, p.Text, effort, func(partial string) {
 			s.mu.Lock()
 			s.state.Results[idx].Answer = partial
 			s.mu.Unlock()
 		})
 		r.Answer = answer
 		r.Tokens = tokens
+		r.ReasoningTokens = reasoning
 		if err != nil {
 			r.Verdict = "unavailable"
 			r.Error = err.Error()

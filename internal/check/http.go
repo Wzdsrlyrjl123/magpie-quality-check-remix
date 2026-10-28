@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -83,7 +84,18 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		s.mu.Lock()
 		lastActivity := s.lastActivity
 		gatewayConfigured := s.state.Config.GatewayURL != "" && s.state.Config.GatewayKey != ""
+		usagePath := ResolveUsagePath(s.state.Config.UsagePath)
+		routeRunning := make([]string, 0, len(s.routeRunning))
+		for model := range s.routeRunning {
+			routeRunning = append(routeRunning, model)
+		}
 		s.mu.Unlock()
+		usageHealth := "未找到 Magpie 请求日志：无法回看真实路由"
+		if usagePath != "" {
+			if _, err := os.Stat(usagePath); err == nil {
+				usageHealth = "Magpie 请求日志可读"
+			}
+		}
 		logHealth := "未配置日志源：自动触发不可用"
 		if state.Config.LogPath != "" {
 			f, err := os.Open(state.Config.LogPath)
@@ -94,7 +106,45 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				logHealth = "日志源可读"
 			}
 		}
-		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": Prompts, "guidance": Guidance})
+		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": Prompts, "guidance": Guidance, "effort_levels": EffortLevels, "usage_path": usagePath, "usage_health": usageHealth, "route_running": routeRunning})
+	})
+	mux.HandleFunc("POST /api/route/check", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Model  string `json:"model"`
+			Effort string `json:"effort"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.CheckRoute(input.Model, input.Effort); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/route/clear", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.ClearRoutes(); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /api/usage", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		path := ResolveUsagePath(s.state.Config.UsagePath)
+		s.mu.Unlock()
+		limit := 100
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				limit = n
+			}
+		}
+		rows, err := UsageRows(path, limit)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		writeJSON(w, map[string]any{"path": path, "rows": rows})
 	})
 	mux.HandleFunc("GET /api/results/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -167,6 +217,55 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, models)
 	})
+	// POST /api/effort sets the reasoning effort for one target, or the global
+	// default when model is empty.
+	mux.HandleFunc("POST /api/effort", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Model  string `json:"model"`
+			Effort string `json:"effort"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.SetEffort(input.Model, input.Effort); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "levels": EffortLevels})
+	})
+	mux.HandleFunc("POST /api/effort/discover", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		cfg := s.state.Config
+		s.mu.Unlock()
+		models, err := Models(r.Context(), cfg)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		byID := make(map[string]Model, len(models))
+		for _, m := range models {
+			byID[m.ID] = m
+		}
+		s.mu.Lock()
+		found, missing := 0, []string{}
+		for id, t := range s.state.Targets {
+			m, ok := byID[id]
+			if !ok {
+				missing = append(missing, id)
+				continue
+			}
+			t.Levels = NormalizeLevels(m.Levels)
+			t.Reasoning = m.Reasoning
+			found++
+		}
+		err = s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "updated": found, "missing": missing})
+	})
 	mux.HandleFunc("POST /api/config", func(w http.ResponseWriter, r *http.Request) {
 		var c Config
 		if !decode(w, r, &c) {
@@ -216,7 +315,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		writeJSON(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("POST /api/action", func(w http.ResponseWriter, r *http.Request) {
-		var a struct{ Model, Action, Prompt string }
+		var a struct{ Model, Action, Prompt, Effort string }
 		if !decode(w, r, &a) {
 			return
 		}
@@ -224,12 +323,12 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		if a.Action == "cancel-test" {
 			err = s.CancelTest(a.Model)
 		} else if a.Action == "modeltrace" {
-			err = s.TriggerModelTrace(a.Model)
+			err = s.TriggerModelTraceWithEffort(a.Model, a.Effort)
 		} else if a.Action == "test" {
 			if a.Prompt == "" {
 				a.Prompt = "milk"
 			}
-			err = s.Trigger(a.Model, a.Prompt, true)
+			err = s.TriggerWithEffort(a.Model, a.Prompt, true, a.Effort)
 		} else {
 			err = s.Action(a.Model, a.Action)
 		}

@@ -18,6 +18,20 @@ test('wildcard listeners are verified through loopback addresses', async()=>{
   assert.equal(cfg.gateway_url,`http://${expected}`);
  }
 });
+test('effort is forwarded only when the plugin option names one', async()=>{
+ const ok=async()=>({ok:true,json:async()=>({data:[]})});
+ assert.equal((await discoverGateway({},{MAGPIE_ADDR:'127.0.0.1:19999',XDG_CONFIG_HOME:'/missing'},ok)).effort,undefined);
+ assert.equal((await discoverGateway({effort:'  '},{MAGPIE_ADDR:'127.0.0.1:19999',XDG_CONFIG_HOME:'/missing'},ok)).effort,undefined);
+ assert.equal((await discoverGateway({effort:'HIGH'},{MAGPIE_ADDR:'127.0.0.1:19999',XDG_CONFIG_HOME:'/missing'},ok)).effort,'high');
+});
+test('new gateway defaults to observation and accepts an explicit harness scope', async()=>{
+ const ok=async()=>({ok:true,json:async()=>({data:[]})});
+ const env={MAGPIE_ADDR:'127.0.0.1:19999',XDG_CONFIG_HOME:'/missing'};
+ const defaults=await discoverGateway({},env,ok);
+ assert.equal(defaults.gate_mode,'observe');assert.equal(defaults.gate_agents,'');
+ const scoped=await discoverGateway({gateMode:'strict',gateAgents:'pi,codex'},env,ok);
+ assert.equal(scoped.gate_mode,'strict');assert.equal(scoped.gate_agents,'pi,codex');
+});
 test('background discovery retries delayed startup and stops after saving',async()=>{
  let attempts=0,saved=0;
  const stop=startGatewayDiscovery({origin:'http://fixture',control:'control'}, {},{

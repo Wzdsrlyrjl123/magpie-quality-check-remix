@@ -33,19 +33,42 @@
   </section>
   <nav class="tabs" role="tablist" aria-label="控制台视图">
     <button id="tab-models" role="tab" aria-selected="true" aria-controls="view-models" data-view="models"><i data-icon="Monitor"></i>模型监测<span id="targetCount" class="tab-count">0</span></button>
+    <button id="tab-routes" role="tab" aria-selected="false" aria-controls="view-routes" tabindex="-1" data-view="routes"><i data-icon="Activity"></i>路由核对</button>
     <button id="tab-tests" role="tab" aria-selected="false" aria-controls="view-tests" tabindex="-1" data-view="tests"><i data-icon="FlaskConical"></i>质量题库</button>
     <button id="tab-fingerprint" role="tab" aria-selected="false" aria-controls="view-fingerprint" tabindex="-1" data-view="fingerprint"><i data-icon="Fingerprint"></i>模型指纹</button>
     <button id="tab-history" role="tab" aria-selected="false" aria-controls="view-history" tabindex="-1" data-view="history"><i data-icon="History"></i>检测记录</button>
   </nav>
   <section id="view-models" class="view" role="tabpanel" aria-labelledby="tab-models">
     <div class="section-heading"><h2>主力模型</h2><span class="meta">通过结果有效期 15 分钟</span></div>
+    <p id="gateState" class="inline-state" role="status"></p>
     <form id="target" class="add-target">
       <label class="grow"><span class="sr-only">完整模型 ID</span><input name="model" list="catalog" aria-label="完整模型 ID" placeholder="provider/model" required autocomplete="off"><datalist id="catalog"></datalist></label>
       <button type="button" id="loadModels" class="secondary"><i data-icon="RefreshCw"></i><span>刷新模型</span></button>
+      <button type="button" id="refreshEffort" class="secondary"><i data-icon="Activity"></i><span>读取思考档位</span></button>
       <button class="primary"><i data-icon="Plus"></i><span>添加监测目标</span></button>
     </form>
     <div class="table-wrap">
-      <table class="targets-table"><thead><tr><th>模型</th><th>状态</th><th>最近通过</th><th>今日预算</th><th class="align-right">操作</th></tr></thead><tbody id="targets"></tbody></table>
+      <table class="targets-table"><thead><tr><th>模型</th><th>状态</th><th>思考强度</th><th>最近通过</th><th>今日预算</th><th class="align-right">操作</th></tr></thead><tbody id="targets"></tbody></table>
+    </div>
+  </section>
+  <section id="view-routes" class="view" role="tabpanel" aria-labelledby="tab-routes" hidden>
+    <div class="section-heading"><h2>路由核对</h2><span class="meta">按请求回执判定，不依赖模型自述</span></div>
+    <p class="disclaimer">发一次最小请求，比较「你请求的别名」与「网关实际交付的模型」。判读顺序：响应头 <code>X-Magpie-Model</code> → Magpie 请求日志 → 模型自述（仅作佐证）。渠道的系统提示词可以改写模型自述，冲突时以前两条为准。核对只消耗探针额度，不改变门禁状态。</p>
+    <div class="test-controls">
+      <label class="grow">完整模型 ID<input id="routeModel" list="catalog" placeholder="provider/model" autocomplete="off" spellcheck="false"></label>
+      <label>思考强度<select id="routeEffort" aria-label="路由核对思考强度"></select></label>
+      <button id="routeRun" class="primary"><i data-icon="Activity"></i><span>核对当前路由</span></button>
+    </div>
+    <p id="routeStatus" class="inline-state" role="status"></p>
+    <div class="answer-heading"><h2>核对结果</h2><div class="answer-tools"><button id="routeExport" class="icon-button" aria-label="导出核对结果" data-tooltip="导出核对结果" data-icon="Download"></button><button id="routeClear" class="icon-button" aria-label="清理核对结果" data-tooltip="清理核对结果" data-icon="Trash2"></button></div></div>
+    <div class="table-wrap route-scroll">
+      <table class="targets-table route-table"><thead><tr><th>请求的模型</th><th>实际交付</th><th>渠道</th><th>耗时</th><th>用量</th><th>模型自述</th></tr></thead><tbody id="routeResults"></tbody></table>
+    </div>
+    <div class="section-heading"><h2>网关请求日志</h2><span id="usagePathLabel" class="meta"></span></div>
+    <p class="disclaimer">来自 Magpie 的 <code>usage.jsonl</code>：<code>req</code> 是请求的别名，<code>served</code> 是最终交付的模型。这条回执由网关落库，不需要模型配合，比探针更可信。</p>
+    <div class="answer-tools"><button id="usageLoad" class="secondary"><i data-icon="RefreshCw"></i><span>读取请求日志</span></button></div>
+    <div class="table-wrap route-scroll">
+      <table class="targets-table route-table usage-table"><thead><tr><th>时间</th><th>调用方</th><th>请求的模型</th><th>实际交付</th><th>渠道</th><th>账号</th><th>状态</th></tr></thead><tbody id="usageRows"></tbody></table>
     </div>
   </section>
   <section id="view-tests" class="view" role="tabpanel" aria-labelledby="tab-tests" hidden>
@@ -53,9 +76,11 @@
     <div class="test-controls">
       <label>测试模型<select id="model" aria-label="测试模型"></select></label>
       <label>测试题<select id="prompt" aria-label="测试题"></select></label>
+      <label>思考强度<select id="effort" aria-label="思考强度"></select></label>
       <button id="run" class="primary"><i data-icon="Play"></i><span>运行所选题目</span></button>
       <button id="cancelTest" class="icon-button" aria-label="取消当前质量检测" data-tooltip="取消当前质量检测" data-icon="X" hidden></button>
     </div>
+    <p id="effortState" class="inline-state" role="status"></p>
     <p id="testStatus" class="inline-state" role="status"></p>
     <div class="answer-heading"><h2>模型回答</h2><div class="answer-tools"><label><span class="sr-only">回答记录</span><select id="testRecord" aria-label="回答记录"></select></label><button id="copyAnswer" class="icon-button" aria-label="复制回答" data-tooltip="复制回答" data-icon="Copy" disabled></button><a id="downloadAnswer" class="icon-button" aria-label="下载回答" title="下载回答" hidden><i data-icon="Download"></i></a></div></div>
     <p id="answerMeta" class="meta"></p>
@@ -80,8 +105,10 @@
     <div class="test-controls trace-controls">
       <label>检测模型<select id="traceModel" aria-label="指纹检测模型"></select></label>
       <label>检测批次<select id="traceBatch" aria-label="指纹检测批次"></select></label>
+      <label>思考强度<select id="traceEffort" aria-label="指纹思考强度"></select></label>
       <button id="traceRun" class="primary"><i data-icon="Fingerprint"></i><span>运行三条指纹挑战</span></button>
     </div>
+    <p id="traceEffortState" class="inline-state" role="status"></p>
     <p class="disclaimer">概率仅表示当前候选库内的相似程度，不证明模型身份；指纹结果不改变门禁。</p>
     <div id="traceResults" aria-live="polite"></div>
   </section>
@@ -109,7 +136,14 @@
       <p id="keyState" class="field-note"></p>
       <label>Magpie 日志绝对路径<input name="log_path" placeholder="/srv/magpie/gateway.log" autocomplete="off"></label>
       <p id="logHealth" class="field-note"></p>
+      <label>Magpie 请求日志路径<input name="usage_path" placeholder="留空自动使用 ~/.config/magpie/usage.jsonl" autocomplete="off"></label>
+      <p id="usageHealth" class="field-note"></p>
       <label>每日每模型请求上限<input name="daily_limit" type="number" min="1" max="10000" value="120" required></label>
+        <label>检测模式<select name="gate_mode" aria-label="检测模式"><option value="observe">仅检测（业务请求继续通过）</option><option value="strict">强制门禁（未通过时拒绝请求）</option></select></label>
+        <label>生效的 harness<input name="gate_agents" placeholder="留空表示全部；例如 pi,codex" maxlength="512" autocomplete="off"></label>
+        <p class="field-note">默认仅检测，可同时使用其他客户端。范围填写 Magpie 的 agent 标识，多个用逗号分隔；未匹配的客户端直接通过。检测结果按模型共享，手动检测不受范围限制。强制门禁的 403 可能被客户端显示为 API 错误。</p>
+      <label>默认思考强度<select name="effort" id="defaultEffort" aria-label="默认思考强度"></select></label>
+      <p id="effortHint" class="field-note"></p>
     </div>
     <div class="dialog-actions"><button type="button" id="checkConnection" class="secondary"><i data-icon="Activity"></i>验证连接</button><button class="primary"><i data-icon="Check"></i>保存设置</button></div>
     <p id="configMessage" class="inline-state" role="status"></p>
