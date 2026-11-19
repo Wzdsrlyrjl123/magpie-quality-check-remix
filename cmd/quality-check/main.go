@@ -80,19 +80,22 @@ func run(dir, gate, addr, binary string, owned bool) error {
 		go func() { io.Copy(io.Discard, os.Stdin); close(parentClosed) }()
 	}
 	go func() { done <- server.Serve(ln) }()
+	shutdown := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			_ = server.Close()
+		}
+	}
 	select {
 	case err := <-done:
 		if err != http.ErrServerClosed {
 			return err
 		}
 	case <-stop:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		server.Shutdown(ctx)
+		shutdown()
 	case <-parentClosed:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		server.Shutdown(ctx)
+		shutdown()
 	}
 	return nil
 }
