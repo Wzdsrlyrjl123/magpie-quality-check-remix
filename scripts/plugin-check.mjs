@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 const root=process.env.PLUGIN_ROOT||path.resolve(import.meta.dirname,'..');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'quality-plugin-'));
 await fs.cp(path.join(root,'plugin'),path.join(dir,'plugin'),{recursive:true});
+await fs.cp(path.join(root,'third_party/cloudflared'),path.join(dir,'third_party/cloudflared'),{recursive:true});
 const gatewayServer=http.createServer((req,res)=>{
  assert.equal(req.url,'/v1/models');assert.equal(req.headers.authorization,'Bearer magpie');
  res.setHeader('content-type','application/json');res.end('{"data":[]}');
