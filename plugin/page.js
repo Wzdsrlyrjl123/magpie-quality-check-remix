@@ -1,3 +1,9 @@
-const service = window.magpie?.service;
-if (service) location.replace(service);
-else document.body.textContent = '当前 Magpie 版本不支持插件页面服务，请升级后重试。';
+const bridge = window.magpie;
+(async () => {
+  try {
+    await bridge?.ready;
+    location.replace(bridge?.service || 'http://127.0.0.1:3489');
+  } catch (error) {
+    document.body.textContent = `质量检测后台无法打开：${error?.message || error}`;
+  }
+})();
