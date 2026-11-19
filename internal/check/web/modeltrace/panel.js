@@ -7,7 +7,7 @@ const percent = value => `${(value * 100).toFixed(1)}%`;
 export async function runModelTrace(request) {
   const model = $('#traceModel').value;
   if (!model) throw Error('请先添加监测模型。');
-  await request('/api/action', { model, action: 'modeltrace' });
+  await request('./api/action', { model, action: 'modeltrace' });
 }
 $('#traceModel').onchange = $('#traceBatch').onchange = () => renderModelTrace(latestData);
 

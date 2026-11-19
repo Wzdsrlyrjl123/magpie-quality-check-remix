@@ -70,7 +70,7 @@ func run(dir, gate, addr, binary string, owned bool) error {
 	console := check.NewConsole(access, origin, dir, binary)
 	defer console.Close()
 	server := &http.Server{Handler: s.ManagedHandler(access, console), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	json.NewEncoder(os.Stdout).Encode(map[string]string{"url": origin + "/open/" + access.Ticket(), "origin": origin, "control": token})
+	json.NewEncoder(os.Stdout).Encode(map[string]string{"url": origin + "/open/" + access.Ticket(), "origin": origin, "control": token, "sidebar": access.SidebarToken()})
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stop)

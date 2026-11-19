@@ -19,14 +19,16 @@ import (
 type Access struct {
 	mu       sync.Mutex
 	control  string
+	sidebar  string
 	tickets  map[string]time.Time
 	sessions map[string]time.Time
 	origins  map[string]bool
 }
 
 func NewAccess(control, localOrigin string) *Access {
-	return &Access{control: control, tickets: map[string]time.Time{}, sessions: map[string]time.Time{}, origins: map[string]bool{localOrigin: true}}
+	return &Access{control: control, sidebar: Secret(), tickets: map[string]time.Time{}, sessions: map[string]time.Time{}, origins: map[string]bool{localOrigin: true}}
 }
+func (a *Access) SidebarToken() string { return a.sidebar }
 func (a *Access) Ticket() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()

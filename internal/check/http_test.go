@@ -18,7 +18,8 @@ func TestManagedHandlerAllowsPluginPageWithoutLeakingControlSecret(t *testing.T)
 	defer service.Close()
 
 	const control = "control-secret"
-	handler := service.ManagedHandler(NewAccess(control, "http://127.0.0.1:3489"), nil)
+	access := NewAccess(control, "http://127.0.0.1:3489")
+	handler := service.ManagedHandler(access, nil)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -26,12 +27,14 @@ func TestManagedHandlerAllowsPluginPageWithoutLeakingControlSecret(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("Origin", "null")
 	if response := mustDo(t, http.DefaultClient, request); response.StatusCode != http.StatusUnauthorized {
 		response.Body.Close()
 		t.Fatalf("unauthenticated API request status = %d, want %d", response.StatusCode, http.StatusUnauthorized)
 	}
 
-	request, err = http.NewRequest(http.MethodGet, server.URL+"/api/state", nil)
+	prefix := server.URL + "/sidebar/" + access.SidebarToken()
+	request, err = http.NewRequest(http.MethodGet, prefix+"/api/state", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,15 +52,28 @@ func TestManagedHandlerAllowsPluginPageWithoutLeakingControlSecret(t *testing.T)
 		t.Fatal("plugin page API response leaked control secret")
 	}
 
-	request, err = http.NewRequest(http.MethodGet, server.URL+"/", nil)
+	request, err = http.NewRequest(http.MethodGet, prefix+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = mustDo(t, http.DefaultClient, request)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("plugin page status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	if !strings.Contains(response.Header.Get("Content-Security-Policy"), "frame-ancestors 'self'") {
+		t.Fatal("plugin page does not allow embedding by Magpie")
+	}
+
+	request, err = http.NewRequest(http.MethodPost, prefix+"/api/config/initial", strings.NewReader("{}"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Header.Set("Origin", "null")
 	response = mustDo(t, http.DefaultClient, request)
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("plugin page status = %d, want %d", response.StatusCode, http.StatusOK)
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("plugin page can access control-only API: status = %d", response.StatusCode)
 	}
 }
 

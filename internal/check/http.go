@@ -338,20 +338,28 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
+	sidebarPrefix := "/sidebar/" + access.sidebar
+	sidebarMux := http.StripPrefix(sidebarPrefix, mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; frame-src 'self'; frame-ancestors 'none'; connect-src 'self'")
-		pageOrigin := r.Header.Get("Origin") == "null"
-		if pageOrigin {
+		ancestors := "'none'"
+		segments := strings.SplitN(r.URL.Path, "/", 4)
+		sidebar := len(segments) == 4 && segments[1] == "sidebar" &&
+			subtle.ConstantTimeCompare([]byte(segments[2]), []byte(access.sidebar)) == 1
+		if sidebar {
+			ancestors = "'self' http://localhost:* http://127.0.0.1:* http://[::1]:*"
+		}
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; frame-src 'self'; frame-ancestors "+ancestors+"; connect-src 'self'")
+		if sidebar {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		}
-		if r.Method == "OPTIONS" && pageOrigin {
-			w.WriteHeader(http.StatusNoContent)
-			return
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		// A public readiness probe exposes no management state or credentials.
 		if r.Method == "GET" && r.URL.Path == "/health" {
@@ -379,16 +387,20 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		control := subtle.ConstantTimeCompare([]byte(supplied), []byte(access.control)) == 1
-		if !control && !access.Session(supplied) && !(pageOrigin && (r.Method == "GET" || r.Method == "POST")) {
+		if !control && !access.Session(supplied) && !sidebar {
 			http.Error(w, "请使用插件生成的完整管理链接", 401)
 			return
 		}
-		if r.URL.Path == "/api/config/initial" && !control {
+		requestPath := r.URL.Path
+		if sidebar {
+			requestPath = strings.TrimPrefix(requestPath, sidebarPrefix)
+		}
+		if requestPath == "/api/config/initial" && !control {
 			http.Error(w, "仅插件可初始化连接", 403)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/console") && !control {
-			if r.URL.Path != "/api/console/close" {
+		if strings.HasPrefix(requestPath, "/api/console") && !control {
+			if requestPath != "/api/console/close" {
 				http.Error(w, "仅插件可签发管理入口", 403)
 				return
 			}
@@ -399,6 +411,10 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				http.Error(w, "Origin 不匹配", 403)
 				return
 			}
+		}
+		if sidebar {
+			sidebarMux.ServeHTTP(w, r)
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})

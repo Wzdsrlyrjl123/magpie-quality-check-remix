@@ -1,6 +1,6 @@
 {
   "name": "magpie-quality-check-remix",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
@@ -17,7 +17,7 @@
       "title": "质量检测",
       "file": "plugin/page.html",
       "service": {
-        "port": 3489
+        "port": 43489
       }
     },
     "middleware": "./plugin/gate.middleware.js",

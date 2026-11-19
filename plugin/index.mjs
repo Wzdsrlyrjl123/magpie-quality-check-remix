@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rename, unlink } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -30,10 +30,11 @@ function start(options = {}) {
     // directory's permissions instead.
     if (platform === 'windows') binary = await stageWindowsBinary(binary, dataDir);
 
-    const args = ['-data', dataDir, '-gate', path.join(root, 'plugin', 'gate.middleware.js'), '-listen', '127.0.0.1:3489', '-owned'];
+    const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    const args = ['-data', dataDir, '-gate', path.join(root, 'plugin', 'gate.middleware.js'), '-listen', `127.0.0.1:${manifest.magpie.page.service.port}`, '-owned'];
     if (options.cloudflaredPath) args.push('-cloudflared', options.cloudflaredPath);
 
-    return await new Promise((resolve, reject) => {
+    const service = await new Promise((resolve, reject) => {
       const process = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       child = process;
       process.stdin.on('error', () => {});
@@ -92,6 +93,18 @@ function start(options = {}) {
         }
       });
     });
+    const sessionFile = path.join(root, 'plugin', 'sidebar-session.js');
+    const temporary = `${sessionFile}.${randomUUID()}.tmp`;
+    try {
+      const session = JSON.stringify({ origin: service.origin, token: service.sidebar });
+      await writeFile(temporary, `window.qualityCheckSidebar = ${session};\n`, { mode: 0o600 });
+      await rename(temporary, sessionFile);
+    } catch (error) {
+      await unlink(temporary).catch(() => {});
+      child?.kill();
+      throw error;
+    }
+    return service;
   })();
 
   ready = startup;
