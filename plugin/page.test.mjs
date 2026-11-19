@@ -12,7 +12,12 @@ async function runPage(magpie) {
   const replacements = [];
   const context = vm.createContext({
     window: { magpie },
-    location: { replace: value => replacements.push(value) },
+    URL,
+    location: {
+      origin: 'https://magpie.example',
+      href: 'https://magpie.example/_magpie/plugin/token/page',
+      replace: value => replacements.push(value),
+    },
     document: { body: { textContent: '' } },
   });
   vm.runInContext(page, context);
@@ -24,9 +29,9 @@ test('loads the bridge before page code', () => {
   assert.ok(html.indexOf('src="_magpie/bridge.js"') < html.indexOf('src="./page.js"'));
 });
 
-test('uses the proxied service in server mode', async () => {
-  const result = await runPage({ ready: Promise.resolve(), service: 'https://example.test/service' });
-  assert.deepEqual(result.replacements, ['https://example.test/service']);
+test('uses the current Magpie host for the proxied server service', async () => {
+  const result = await runPage({ ready: Promise.resolve(), service: 'http://100.127.147.101:3489/_magpie/plugin/token/service/' });
+  assert.deepEqual(result.replacements, ['https://magpie.example/_magpie/plugin/token/service/']);
   assert.equal(result.message, '');
 });
 
