@@ -1,6 +1,6 @@
 {
   "name": "magpie-quality-check-remix",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
