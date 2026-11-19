@@ -31,7 +31,7 @@ try{
  assert.equal(state.gateway_configured,true,'delayed gateway not discovered');
  assert.equal(state.state.config.gateway_url,gateway);
  assert.equal(state.state.config.gateway_key,'');
- p.kill('SIGKILL');await new Promise(r=>p.once('exit',r));
+ p.kill('SIGTERM');await new Promise(r=>p.once('exit',r));
  const stopDeadline=Date.now()+6000;let closed=false;while(Date.now()<stopDeadline&&!closed){try{await fetch(v.second)}catch{closed=true}if(!closed)await new Promise(r=>setTimeout(r,150))}assert.ok(closed,'Go service survived host exit');
  console.log('PASS: plugin starts before gateway, background discovery configures delayed gateway, new tickets, host death stops Go service');
 }finally{if(p.exitCode===null&&p.signalCode===null)p.kill('SIGKILL');await new Promise(resolve=>gatewayServer.close(resolve));await fs.rm(dir,{recursive:true,force:true})}
