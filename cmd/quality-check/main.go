@@ -20,7 +20,7 @@ import (
 func main() {
 	dir := flag.String("data", "data", "private data directory")
 	gate := flag.String("gate", "plugin/gate.middleware.js", "middleware entrypoint")
-	listen := flag.String("listen", "127.0.0.1:0", "loopback address")
+	listen := flag.String("listen", "127.0.0.1:3489", "loopback address")
 	cloudflared := flag.String("cloudflared", "", "official cloudflared executable")
 	owned := flag.Bool("owned", false, "stop when parent input closes")
 	flag.Parse()

@@ -46,7 +46,7 @@ export function renderModelTrace(data) {
   if (!bank) {
     panel.append(text('p', '正在读取指纹库', 'muted'));
     if (!bankLoading) {
-      bankLoading = fetch('/modeltrace/unified_bank.json').then(async response => {
+      bankLoading = fetch('./modeltrace/unified_bank.json').then(async response => {
         if (!response.ok) throw Error(`指纹库读取失败（HTTP ${response.status}）。`);
         bank = await response.json(); rendered = undefined; renderModelTrace(latestData);
       }).catch(error => {

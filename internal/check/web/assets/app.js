@@ -147,7 +147,7 @@ async function persistEffort(model, effort, select) {
   if (!model) return;
   select.disabled = true;
   try {
-    await request('/api/effort', { model, effort });
+    await request('./api/effort', { model, effort });
     feedback(`${model}：思考强度已设为 ${effort ? effortLabel(effort) : '跟随默认设置'}`, true);
     await refresh();
   } catch (error) { feedback(error.message); }
@@ -234,7 +234,7 @@ $('#routeRun').onclick = () => pending($('#routeRun'), async () => {
   if (!requireGateway()) return;
   const model = $('#routeModel').value.trim();
   $('#routeStatus').textContent = `正在向 ${model} 发送一次探测请求…`;
-  await request('/api/route/check', { model, effort: $('#routeEffort').value });
+  await request('./api/route/check', { model, effort: $('#routeEffort').value });
   feedback('已开始核对路由', true);
   await refresh();
   $('#routeStatus').textContent = routeRunning(model) ? '核对进行中，结果会稍后出现在下表。' : '';
@@ -242,7 +242,7 @@ $('#routeRun').onclick = () => pending($('#routeRun'), async () => {
 $('#routeClear').onclick = () => pending($('#routeClear'), async () => {
   if (!(data?.state.routes || []).length) return;
   if (!confirm('清理全部路由核对结果？网关请求日志与质量检测记录不受影响。')) return;
-  await request('/api/route/clear', {});
+  await request('./api/route/clear', {});
   feedback('路由核对结果已清理', true);
   await refresh();
 });
@@ -258,7 +258,7 @@ async function loadUsage() {
   const button = $('#usageLoad');
   button.disabled = true;
   try {
-    const result = await request('/api/usage?limit=200');
+    const result = await request('./api/usage?limit=200');
     const rows = result.rows || [];
     $('#usagePathLabel').textContent = result.path || '';
     const cells = rows.map(entry => {
@@ -322,7 +322,7 @@ function renderTestAnswer() {
   $('#testAnswer').setAttribute('aria-busy', String(Boolean(running)));
   $('#copyAnswer').disabled = !answer;
   $('#downloadAnswer').hidden = !answer;
-  if (record) $('#downloadAnswer').href = '/api/results/' + encodeURIComponent(record.id) + '/download';
+  if (record) $('#downloadAnswer').href = './api/results/' + encodeURIComponent(record.id) + '/download';
   const review = $('#answerReview');
   review.hidden = !answer || running;
   if (shownRecord !== record?.id) { reviewDirty = false; $('#reviewMessage').textContent = ''; }
@@ -397,7 +397,7 @@ function renderTargets() {
       button.disabled = (action !== 'test' && !target.enabled) || (action === 'test' && modelRunning(target.model));
       button.onclick = () => pending(button, async () => {
         if (action === 'test' && !requireGateway()) return;
-        await request('/api/action', { model: target.model, action });
+        await request('./api/action', { model: target.model, action });
         feedback(`${target.model}：${action === 'test' ? '已开始检测' : action === 'allow' ? (strict ? '已放行 15 分钟' : '自动检测已暂缓 15 分钟，业务继续通过') : (strict ? '已暂停' : '已标记待确认，业务继续通过')}`, true);
         await refresh();
       });
@@ -408,7 +408,7 @@ function renderTargets() {
     input.setAttribute('aria-label', `监测 ${target.model}`);
     input.onchange = async () => {
       input.disabled = true;
-      try { await request('/api/target', { model: target.model, enabled: input.checked }); await refresh(); }
+      try { await request('./api/target', { model: target.model, enabled: input.checked }); await refresh(); }
       catch (error) { input.checked = target.enabled; feedback(error.message); }
       finally { input.disabled = false; }
     };
@@ -417,7 +417,7 @@ function renderTargets() {
     remove.setAttribute('aria-label', `删除 ${target.model}`); remove.dataset.tooltip = '删除监测目标'; remove.disabled = modelRunning(target.model);
     remove.onclick = () => {
       if (!confirm(`删除 ${target.model}？该模型将不再受监测门禁限制，历史记录保留。`)) return;
-      pending(remove, async () => { await request('/api/target/delete', { model: target.model }); feedback('已删除监测目标，历史记录保留', true); await refresh(); });
+      pending(remove, async () => { await request('./api/target/delete', { model: target.model }); feedback('已删除监测目标，历史记录保留', true); await refresh(); });
     };
     tools.append(remove);
     row.append(model, status, effortCell, checked, budget, actions);
@@ -456,7 +456,7 @@ function renderHistory() {
     body.append(text('p', effortMeta, 'meta'));
     body.append(text('pre', record.answer || (record.verdict === 'running' ? '等待回答' : '未返回回答正文')));
     const download = text('a', '下载原始回答', 'download'); download.prepend(icon('Download'));
-    download.href = '/api/results/' + encodeURIComponent(record.id) + '/download'; body.append(download);
+    download.href = './api/results/' + encodeURIComponent(record.id) + '/download'; body.append(download);
     const prompt = record.prompt_text || data.prompts.find(p => p.id === record.prompt)?.text;
     if (prompt) body.append(text('p', '提示词原文', 'prompt-label'), text('pre', prompt));
     details.append(summary, body); return details;
@@ -475,7 +475,7 @@ async function refresh() {
   if (polling || stopped) return;
   polling = true;
   try {
-    data = await request('/api/state');
+    data = await request('./api/state');
     if (pollError && $('#message').textContent === pollError) feedback('');
     pollError = '';
     $('#health').textContent = data.health ? '服务异常' : data.gateway_configured ? '网关已配置' : '等待连接';
@@ -525,7 +525,7 @@ $('#effort').onchange = () => persistEffort($('#model').value, $('#effort').valu
 $('#traceEffort').onchange = () => persistEffort($('#traceModel').value, $('#traceEffort').value, $('#traceEffort'));
 $('#refreshEffort').onclick = () => pending($('#refreshEffort'), async () => {
   if (!requireGateway()) return;
-  const result = await request('/api/effort/discover', {});
+  const result = await request('./api/effort/discover', {});
   feedback(result.missing?.length
     ? `已更新 ${result.updated} 个模型的思考档位；网关未列出：${result.missing.join('、')}`
     : `已更新 ${result.updated} 个模型的思考档位`, !result.missing?.length);
@@ -537,7 +537,7 @@ $('#answerReview').onsubmit = event => {
   const id = shownRecord;
   const values = Object.fromEntries(new FormData(event.target));
   pending(event.target.querySelector('button'), async () => {
-    await request('/api/results/' + encodeURIComponent(id) + '/review', values);
+    await request('./api/results/' + encodeURIComponent(id) + '/review', values);
     if (shownRecord === id) { reviewDirty = false; $('#reviewMessage').textContent = '审核已保存'; }
     await refresh();
   }, $('#reviewMessage'));
@@ -558,7 +558,7 @@ $('#clearHistory').onclick = () => pending($('#clearHistory'), async () => {
   const records = filteredHistory();
   if (!records.length) return;
   if (!confirm(`永久清理当前筛选的 ${records.length} 条记录？原始回答与审核将删除，已消耗预算和模型门禁保持不变。`)) return;
-  await request('/api/results/clear', { ids: records.map(r => r.id) });
+  await request('./api/results/clear', { ids: records.map(r => r.id) });
   await refresh();
   feedback('记录已清理，预算与模型门禁保持不变', true);
 });
@@ -571,7 +571,7 @@ $('#run').onclick = () => pending($('#run'), async () => {
   $('#testRecord').value = ''; renderTestAnswer();
   const level = effortFor(model);
   try {
-    await request('/api/action', { model, action: 'test', prompt });
+    await request('./api/action', { model, action: 'test', prompt });
     feedback(`已开始检测（强度 ${level ? effortLabel(level) : '未指定'}）`, true); await refresh();
   } catch (error) {
     awaitingTest = undefined;
@@ -581,7 +581,7 @@ $('#run').onclick = () => pending($('#run'), async () => {
   }
 });
 $('#cancelTest').onclick = () => pending($('#cancelTest'), async () => {
-  await request('/api/action', { model: $('#model').value, action: 'cancel-test' });
+  await request('./api/action', { model: $('#model').value, action: 'cancel-test' });
   await refresh();
 });
 $('#traceRun').onclick = () => pending($('#traceRun'), async () => {
@@ -590,7 +590,7 @@ $('#traceRun').onclick = () => pending($('#traceRun'), async () => {
 });
 $('#loadModels').onclick = () => pending($('#loadModels'), async () => {
   if (!requireGateway()) return;
-  const models = await request('/api/models');
+  const models = await request('./api/models');
   $('#catalog').replaceChildren(...models.map(m => { const option = text('option', m.group); option.value = m.id; return option; }));
   feedback(`已读取 ${models.length} 个模型`, true);
 });
@@ -598,20 +598,20 @@ $('#target').onsubmit = event => {
   event.preventDefault();
   const form = event.target;
   pending(form.querySelector('button:last-child'), async () => {
-    await request('/api/target', { model: form.elements.model.value.trim(), enabled: true });
+    await request('./api/target', { model: form.elements.model.value.trim(), enabled: true });
     form.reset(); feedback('已添加监测目标', true); await refresh();
   });
 };
 async function saveConfig() {
   const values = Object.fromEntries(new FormData(config)); values.daily_limit = Number(values.daily_limit);
-  await request('/api/config', values);  config.elements.gateway_key.value = ''; config.elements.gateway_key.type = secretType;
+  await request('./api/config', values);  config.elements.gateway_key.value = ''; config.elements.gateway_key.type = secretType;
   $('#showKey').replaceChildren(icon('Eye'));
   $('#showKey').setAttribute('aria-label', '显示输入的 Key');
   $('#showKey').dataset.tooltip = '显示输入的 Key';
   configDirty = false; await refresh();
 }
 async function checkConnection() {
-  const result = await request('/api/connection/check', {});
+  const result = await request('./api/connection/check', {});
   $('#configMessage').textContent = `连接成功：${result.model_count} 个模型`;
   $('#configMessage').className = 'inline-state success';
 }
@@ -630,7 +630,7 @@ $('#checkConnection').onclick = () => pending($('#checkConnection'), async () =>
   await checkConnection();
 }, $('#configMessage'));
 $('#closeRemote').onclick = () => pending($('#closeRemote'), async () => {
-  await request('/api/console/close', {}); stopped = true;
+  await request('./api/console/close', {}); stopped = true;
   feedback('远程访问已结束，请从插件重新打开。');
 });
 await refresh();

@@ -343,6 +343,16 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; frame-src 'self'; frame-ancestors 'none'; connect-src 'self'")
+		pageOrigin := r.Header.Get("Origin") == "null"
+		if pageOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		}
+		if r.Method == "OPTIONS" && pageOrigin {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		// A public readiness probe exposes no management state or credentials.
 		if r.Method == "GET" && r.URL.Path == "/health" {
 			w.Header().Set("X-Magpie-Quality", "ready")
@@ -369,7 +379,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		control := subtle.ConstantTimeCompare([]byte(supplied), []byte(access.control)) == 1
-		if !control && !access.Session(supplied) {
+		if !control && !access.Session(supplied) && !(pageOrigin && (r.Method == "GET" || r.Method == "POST")) {
 			http.Error(w, "请使用插件生成的完整管理链接", 401)
 			return
 		}
@@ -385,7 +395,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		if r.Method != "GET" {
 			origin := r.Header.Get("Origin")
-			if origin != "" && !access.Origin(origin) {
+			if origin != "" && origin != "null" && !access.Origin(origin) {
 				http.Error(w, "Origin 不匹配", 403)
 				return
 			}

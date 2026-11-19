@@ -102,7 +102,7 @@ magpie plugin add /absolute/path/to/magpie-quality-check-remix
 
 ## 首次配置
 
-1. 在 Magpie 插件入口打开“本机质量检测控制台”。
+1. 在 Magpie 侧边栏打开“质量检测”；检测和设置都在侧栏内完成，不会为本机控制台另开浏览器页面。
 2. 点击右上角设置图标，在“连接与预算”中确认网关 URL、Key 和日志路径，保存后会验证连接。
 3. 点击“刷新模型”，选择完整模型 ID，例如 `provider/model`，添加监测目标。
 4. 先运行一次“牛奶推理”确认网关和探针可用。

@@ -60,7 +60,7 @@ async function startPreview() {
   const ticket = generation;
   const controller = new AbortController();
   loading = controller;
-  const url = '/api/results/' + encodeURIComponent(currentRecord.id) + '/preview' + (candidate.value ? '?candidate=' + candidate.value : '');
+  const url = './api/results/' + encodeURIComponent(currentRecord.id) + '/preview' + (candidate.value ? '?candidate=' + candidate.value : '');
   status.textContent = '正在加载…';
   stop.disabled = false;
   try {
